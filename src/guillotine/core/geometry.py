@@ -22,3 +22,9 @@ class SheetGeometry:
             self.defects.append((dx, dy, dw, dh, dx + dw, dy + dh))
         
         self.n_def = n_def
+
+    def is_pure(self, x, y, w, h):
+        """Check if rectangle is free of defects."""
+        if self.n_def == 0:
+            return True
+        return False
