@@ -94,3 +94,23 @@ def test_is_pure_zero_dimensions():
     # Negative dimensions
     assert geom.is_pure(5, 5, -5, 10) is True
     assert geom.is_pure(5, 5, 10, -5) is True
+
+def test_multiple_defects():
+    """Test with multiple defects."""
+    geom = SheetGeometry(
+        sheet_sz=(30, 30),
+        defect_sizes=[[2, 2, 3], [2, 2, 1]],
+        defect_positions=[[5, 12, 18], [5, 7, 10]]
+    )
+    
+    assert geom.n_def == 3
+    assert len(geom.defects) == 3
+    
+    # Between defects should be pure
+    assert geom.is_pure(10, 10, 2, 2) is True
+    
+    # Overlapping first defect should not be pure
+    assert geom.is_pure(4, 4, 3, 3) is False
+    
+    # Overlapping second defect should not be pure
+    assert geom.is_pure(11, 6, 3, 3) is False
