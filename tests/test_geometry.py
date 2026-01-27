@@ -49,3 +49,31 @@ def test_is_pure_no_defects():
     assert geom.is_pure(0, 0, 10, 10) is True
     assert geom.is_pure(5, 5, 5, 5) is True
     assert geom.is_pure(0, 0, 20, 20) is True
+
+def test_is_pure_detects_overlap():
+    """Rectangle overlapping defect should NOT be pure."""
+    geom = SheetGeometry(
+        sheet_sz=(20, 20),
+        defect_sizes=[[2], [2]],
+        defect_positions=[[10], [10]]  # Defect at (10,10) size 2x2
+    )
+    
+    # Exact defect location
+    assert geom.is_pure(10, 10, 2, 2) is False
+    
+    # Overlapping defect
+    assert geom.is_pure(9, 9, 3, 3) is False
+
+def test_is_pure_clear_area():
+    """Areas without defects should be pure."""
+    geom = SheetGeometry(
+        sheet_sz=(20, 20),
+        defect_sizes=[[2], [2]],
+        defect_positions=[[10], [10]]  # Defect at (10,10)
+    )
+    
+    # Before defect - should be pure
+    assert geom.is_pure(0, 0, 5, 5) is True
+    
+    # After defect - should be pure  
+    assert geom.is_pure(15, 15, 5, 5) is True
