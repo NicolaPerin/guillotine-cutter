@@ -73,3 +73,22 @@ def test_pattern_generator_stores_patterns():
     
     # Check patterns exist for width
     assert isinstance(gen.np_x, dict)
+
+def test_cuts_pure_x():
+    """Test getting valid X cuts for pure rectangle."""
+    from guillotine.core.geometry import SheetGeometry
+    from guillotine.core.patterns import CutPatternGenerator
+    
+    geom = SheetGeometry((20, 20), [[], []], [[], []])
+    gen = CutPatternGenerator([[3, 4], [3, 4]], geom)
+    
+    # Get cuts for width=12
+    cuts = gen.cuts_pure_x(12)
+    
+    # Should include positions like 3, 4, 6, 8...
+    assert 3 in cuts
+    assert 4 in cuts
+    assert 6 in cuts  # 3+3
+    
+    # Should be a list
+    assert isinstance(cuts, list)
