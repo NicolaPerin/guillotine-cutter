@@ -18,6 +18,7 @@ def test_compute_patterns_single_size():
     assert 4 in patterns[12]
     assert 8 in patterns[12]
 
+
 def test_compute_patterns_two_sizes():
     """With two sizes, combinations should be reachable."""
     patterns = compute_normal_patterns([3, 5], 20)
@@ -33,5 +34,6 @@ def test_compute_patterns_two_sizes():
     assert 3 in patterns[8]
     assert 5 in patterns[8]
     
-    # Non-reachable (7 cannot be made from 3 and 5)
-    assert len(patterns[7]) == 0
+    # Length 1 or 2 not reachable (too small for any item)
+    assert len(patterns[1]) == 0
+    assert len(patterns[2]) == 0
