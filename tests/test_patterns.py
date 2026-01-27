@@ -92,3 +92,19 @@ def test_cuts_pure_x():
     
     # Should be a list
     assert isinstance(cuts, list)
+
+def test_cuts_pure_y():
+    """Test getting valid Y cuts for pure rectangle."""
+    from guillotine.core.geometry import SheetGeometry
+    from guillotine.core.patterns import CutPatternGenerator
+    
+    geom = SheetGeometry((20, 20), [[], []], [[], []])
+    gen = CutPatternGenerator([[3, 4], [3, 4]], geom)
+    
+    # Get cuts for height=12
+    cuts = gen.cuts_pure_y(12)
+    
+    # Should include positions
+    assert 3 in cuts
+    assert 4 in cuts
+    assert isinstance(cuts, list)
