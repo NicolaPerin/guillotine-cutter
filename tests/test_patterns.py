@@ -45,3 +45,15 @@ def test_compute_patterns_empty_items():
     # All lengths should have no cuts
     assert len(patterns[5]) == 0
     assert len(patterns[10]) == 0
+
+def test_pattern_generator_init():
+    """Test CutPatternGenerator initialization."""
+    from guillotine.core.geometry import SheetGeometry
+    from guillotine.core.patterns import CutPatternGenerator
+    
+    geom = SheetGeometry((20, 20), [[], []], [[], []])
+    gen = CutPatternGenerator([[3, 4], [3, 4]], geom)
+    
+    assert gen.W0 == 20
+    assert gen.H0 == 20
+    assert gen.geom == geom
