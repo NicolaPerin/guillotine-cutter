@@ -17,6 +17,7 @@ def compute_normal_patterns(item_sizes, max_L):
     
     return patterns
 
+
 class CutPatternGenerator:
     """Generates candidate cut positions."""
     
@@ -24,3 +25,7 @@ class CutPatternGenerator:
         """Initialize pattern generator."""
         self.geom = geometry
         self.W0, self.H0 = geometry.W0, geometry.H0
+        
+        # Precompute normal patterns for both directions
+        self.np_x = compute_normal_patterns(item_sizes[0], self.W0)
+        self.np_y = compute_normal_patterns(item_sizes[1], self.H0)
