@@ -15,3 +15,25 @@ def test_init_no_defects():
     assert geom.W0 == 20
     assert geom.H0 == 20
     assert geom.n_def == 0
+
+def test_init_with_single_defect():
+    """Test initialization with one defect."""
+    geom = SheetGeometry(
+        sheet_sz=(20, 20),
+        defect_sizes=[[2], [2]],
+        defect_positions=[[5], [5]]
+    )
+    
+    assert geom.W0 == 20
+    assert geom.H0 == 20
+    assert geom.n_def == 1
+    assert len(geom.defects) == 1
+    
+    # Check defect tuple: (x, y, w, h, x_end, y_end)
+    dx, dy, dw, dh, dx_end, dy_end = geom.defects[0]
+    assert dx == 5
+    assert dy == 5
+    assert dw == 2
+    assert dh == 2
+    assert dx_end == 7
+    assert dy_end == 7
