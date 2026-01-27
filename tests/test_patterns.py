@@ -37,3 +37,11 @@ def test_compute_patterns_two_sizes():
     # Length 1 or 2 not reachable (too small for any item)
     assert len(patterns[1]) == 0
     assert len(patterns[2]) == 0
+
+def test_compute_patterns_empty_items():
+    """With no items, no positions should be reachable."""
+    patterns = compute_normal_patterns([], 10)
+    
+    # All lengths should have no cuts
+    assert len(patterns[5]) == 0
+    assert len(patterns[10]) == 0
