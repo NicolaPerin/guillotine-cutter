@@ -10,9 +10,9 @@ if os.path.exists("README.md"):
 setup(
     name="guillotine-cutter",
     version="0.1.0",
-    author="Your Name",
-    author_email="your.email@example.com",
-    description="High-performance 2D guillotine cutting optimizer with defect handling",
+    author="Nicola Perin",
+    author_email="nicolaperin1998@gmail.com",
+    description="Fast 2D guillotine cutting optimizer with defect handling",
     long_description=long_description,
     long_description_content_type="text/markdown",
     packages=find_packages(where="src"),
