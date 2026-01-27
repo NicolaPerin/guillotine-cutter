@@ -17,8 +17,6 @@ def compute_normal_patterns(item_sizes, max_L):
     
     return patterns
 
-
-
 class CutPatternGenerator:
     """Generates candidate cut positions."""
     
@@ -34,3 +32,7 @@ class CutPatternGenerator:
     def cuts_pure_x(self, w):
         """Get valid X cuts for pure rectangle of width w."""
         return self.np_x.get(w, [])
+    
+    def cuts_pure_y(self, h):
+        """Get valid X cuts for pure rectangle of width w."""
+        return self.np_y.get(h, [])
