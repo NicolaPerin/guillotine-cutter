@@ -7,3 +7,7 @@ __pycache__/
 
 # Egg info
 *.egg-info/
+
+# Coverage reports
+.coverage
+htmlcov/
