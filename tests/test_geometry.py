@@ -143,3 +143,17 @@ def test_defect_outside_bounds():
     
     # Area fully outside defect range should be pure
     assert geom.is_pure(5, 5, 5, 5) is True
+
+def test_overlapping_defects():
+    """Test multiple defects at same location."""
+    geom = SheetGeometry(
+        sheet_sz=(20, 20),
+        defect_sizes=[[3, 3], [3, 3]],
+        defect_positions=[[5, 5], [5, 5]]  # Same location
+    )
+    
+    # Should still detect as not pure
+    assert geom.is_pure(5, 5, 3, 3) is False
+    
+    # Area outside should be pure
+    assert geom.is_pure(10, 10, 5, 5) is True
