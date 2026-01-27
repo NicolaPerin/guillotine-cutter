@@ -157,3 +157,16 @@ def test_overlapping_defects():
     
     # Area outside should be pure
     assert geom.is_pure(10, 10, 5, 5) is True
+
+def test_rectangle_outside_sheet():
+    """Test rectangle completely outside sheet bounds."""
+    geom = SheetGeometry(
+        sheet_sz=(20, 20),
+        defect_sizes=[[2], [2]],
+        defect_positions=[[10], [10]]
+    )
+    
+    # Completely outside sheet
+    assert geom.is_pure(25, 25, 5, 5) is True
+    assert geom.is_pure(-10, -10, 5, 5) is True
+    assert geom.is_pure(20, 0, 5, 5) is True  # Starts at edge
