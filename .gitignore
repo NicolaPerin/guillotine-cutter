@@ -1,1 +1,9 @@
 .venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Egg info
+*.egg-info/
