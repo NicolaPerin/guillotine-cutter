@@ -16,3 +16,11 @@ def compute_normal_patterns(item_sizes, max_L):
         patterns[L] = [z for z in range(1, L) if reachable[z]]
     
     return patterns
+
+class CutPatternGenerator:
+    """Generates candidate cut positions."""
+    
+    def __init__(self, item_sizes, geometry):
+        """Initialize pattern generator."""
+        self.geom = geometry
+        self.W0, self.H0 = geometry.W0, geometry.H0
