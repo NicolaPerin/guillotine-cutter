@@ -114,3 +114,18 @@ def test_multiple_defects():
     
     # Overlapping second defect should not be pure
     assert geom.is_pure(11, 6, 3, 3) is False
+
+def test_defect_at_origin():
+    """Test defect at (0, 0)."""
+    geom = SheetGeometry(
+        sheet_sz=(20, 20),
+        defect_sizes=[[5], [5]],
+        defect_positions=[[0], [0]]
+    )
+    
+    # Defect area should not be pure
+    assert geom.is_pure(0, 0, 5, 5) is False
+    assert geom.is_pure(0, 0, 3, 3) is False
+    
+    # Area after defect should be pure
+    assert geom.is_pure(5, 5, 5, 5) is True
