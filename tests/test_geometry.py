@@ -77,3 +77,20 @@ def test_is_pure_clear_area():
     
     # After defect - should be pure  
     assert geom.is_pure(15, 15, 5, 5) is True
+
+def test_is_pure_zero_dimensions():
+    """Rectangles with zero or negative dimensions should be pure."""
+    geom = SheetGeometry(
+        sheet_sz=(20, 20),
+        defect_sizes=[[2], [2]],
+        defect_positions=[[10], [10]]
+    )
+    
+    # Zero dimensions
+    assert geom.is_pure(5, 5, 0, 10) is True
+    assert geom.is_pure(5, 5, 10, 0) is True
+    assert geom.is_pure(5, 5, 0, 0) is True
+    
+    # Negative dimensions
+    assert geom.is_pure(5, 5, -5, 10) is True
+    assert geom.is_pure(5, 5, 10, -5) is True
