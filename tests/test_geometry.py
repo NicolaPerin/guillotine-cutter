@@ -129,3 +129,17 @@ def test_defect_at_origin():
     
     # Area after defect should be pure
     assert geom.is_pure(5, 5, 5, 5) is True
+
+def test_defect_outside_bounds():
+    """Test defect partially or fully outside sheet."""
+    geom = SheetGeometry(
+        sheet_sz=(10, 10),
+        defect_sizes=[[5], [5]],
+        defect_positions=[[-2], [-2]]  # Starts at (-2,-2)
+    )
+    
+    # Only part inside (0,0) to (3,3) should affect purity
+    assert geom.is_pure(0, 0, 3, 3) is False
+    
+    # Area fully outside defect range should be pure
+    assert geom.is_pure(5, 5, 5, 5) is True
