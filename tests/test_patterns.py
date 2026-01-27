@@ -108,3 +108,26 @@ def test_cuts_pure_y():
     assert 3 in cuts
     assert 4 in cuts
     assert isinstance(cuts, list)
+
+def test_cuts_defected_basic():
+    """Test cuts_defected with simple defect."""
+    from guillotine.core.geometry import SheetGeometry
+    from guillotine.core.patterns import CutPatternGenerator
+    
+    geom = SheetGeometry(
+        (30, 30),
+        [[5], [5]],
+        [[10], [10]]  # Defect at (10,10) size 5x5
+    )
+    gen = CutPatternGenerator([[3, 4], [3, 4]], geom)
+    
+    # Rectangle from (0,0) size 20x20 contains the defect
+    x_cuts, y_cuts = gen.cuts_defected(0, 0, 20, 20)
+    
+    # Should include defect boundaries
+    assert 10 in x_cuts  # Left edge of defect
+    assert 15 in x_cuts  # Right edge of defect (10+5)
+    
+    # Both should be lists
+    assert isinstance(x_cuts, list)
+    assert isinstance(y_cuts, list)
