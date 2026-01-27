@@ -57,3 +57,19 @@ def test_pattern_generator_init():
     assert gen.W0 == 20
     assert gen.H0 == 20
     assert gen.geom == geom
+
+
+def test_pattern_generator_stores_patterns():
+    """Test that generator precomputes normal patterns."""
+    from guillotine.core.geometry import SheetGeometry
+    from guillotine.core.patterns import CutPatternGenerator
+    
+    geom = SheetGeometry((20, 20), [[], []], [[], []])
+    gen = CutPatternGenerator([[3, 4], [3, 4]], geom)
+    
+    # Should have precomputed patterns
+    assert hasattr(gen, 'np_x')
+    assert hasattr(gen, 'np_y')
+    
+    # Check patterns exist for width
+    assert isinstance(gen.np_x, dict)
