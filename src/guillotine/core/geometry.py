@@ -2,7 +2,6 @@
 
 import numpy as np
 
-
 class SheetGeometry:
     """Handles defects with O(1) purity queries using 2D prefix sums."""
     
@@ -67,4 +66,4 @@ class SheetGeometry:
                        self.prefix[x1, y0] + 
                        self.prefix[x0, y0])
         
-        return defect_count == 0
+        return bool(defect_count == 0)
