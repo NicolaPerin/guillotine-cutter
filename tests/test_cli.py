@@ -9,3 +9,11 @@ def test_cli_main_exists():
     
     # Should be callable
     assert callable(main)
+
+def test_cli_parse_args():
+    """Test that CLI can parse arguments."""
+    from guillotine.__main__ import parse_args
+    
+    # Test JSON input
+    args = parse_args(['problem.json'])
+    assert args.input == 'problem.json'
