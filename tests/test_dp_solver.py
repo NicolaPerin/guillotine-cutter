@@ -118,3 +118,32 @@ def test_dp_solver_zero_dimensions():
     value, sequence = dp._F(0, 0, -5, 5)
     assert value == 0
     assert sequence == "empty"
+
+def test_dp_solver_paper_benchmark():
+    """Test benchmark case from original paper.
+    
+    Square sheet 27x27
+    Items: 5x5, 10x10, 12x12, 15x15
+    Defect: 2x2 at (9,9)
+    Expected optimal: 644 out of 729
+    """
+    item_sizes = [[5, 10, 12, 15], [5, 10, 12, 15]]
+    geom = SheetGeometry((27, 27), [[2], [2]], [[9], [9]])
+    patterns = CutPatternGenerator(item_sizes, geom)
+    
+    dp = GuillotineDP(item_sizes, geom, patterns)
+    value, sequence = dp.solve()
+    
+    # Should achieve optimal value from paper
+    assert value == 644
+    
+    # Should not be trivial
+    assert sequence != "empty"
+    assert sequence != "defect"
+    
+    # Total sheet area
+    assert 27 * 27 == 729
+    
+    # Utilization
+    utilization = value / 729
+    assert utilization > 0.88  # 644/729 ≈ 88.3%
