@@ -8,6 +8,10 @@ version = "0.1.0"
 description = "2D guillotine cutting optimizer with defect handling"
 readme = "README.md"
 requires-python = ">=3.8"
+dependencies = [
+    "numpy>=1.20.0",
+    "matplotlib>=3.3.0",
+]
 
 [tool.pytest.ini_options]
 minversion = "7.0"
