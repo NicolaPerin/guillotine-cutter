@@ -30,6 +30,20 @@ def parse_args(argv=None):
         help='Sheet size (e.g., 27x27)'
     )
     
+    # Output options
+    parser.add_argument(
+        '--output', '-o',
+        help='Output JSON file (default: solution.json)',
+        default='solution.json'
+    )
+    
+    # Built-in test
+    parser.add_argument(
+        '--benchmark',
+        action='store_true',
+        help='Run paper benchmark case (27x27 sheet)'
+    )
+    
     return parser.parse_args(argv)
 
 def main():
