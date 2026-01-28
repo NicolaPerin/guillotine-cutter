@@ -129,3 +129,34 @@ def load_items_csv(filepath):
             heights.append(int(row['height']))
     
     return [widths, heights]
+
+def load_defects_csv(filepath):
+    """Load defects from CSV file.
+    
+    Expected CSV format:
+        x,y,width,height
+        9,9,2,2
+        15,15,3,3
+    
+    Returns:
+        Tuple of (defect_sizes, defect_positions)
+    """
+    import csv
+    
+    widths = []
+    heights = []
+    x_positions = []
+    y_positions = []
+    
+    with open(filepath, 'r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            x_positions.append(int(row['x']))
+            y_positions.append(int(row['y']))
+            widths.append(int(row['width']))
+            heights.append(int(row['height']))
+    
+    defect_sizes = [widths, heights]
+    defect_positions = [x_positions, y_positions]
+    
+    return defect_sizes, defect_positions
