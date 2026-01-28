@@ -9,3 +9,7 @@ class GuillotineDP:
         self.geom = geometry
         self.patterns = patterns
         self.W0, self.H0 = geometry.W0, geometry.H0
+
+    def solve(self):
+        """Solve the cutting problem."""
+        return (0, "empty")
