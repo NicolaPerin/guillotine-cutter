@@ -31,3 +31,16 @@ def test_cli_parse_csv_args():
     assert args.items == 'items.csv'
     assert args.defects == 'defects.csv'
     assert args.sheet == '27x27'
+
+
+def test_cli_parse_output_and_benchmark():
+    """Test parsing output and benchmark arguments."""
+    from guillotine.__main__ import parse_args
+    
+    # Test output argument
+    args = parse_args(['problem.json', '--output', 'solution.json'])
+    assert args.output == 'solution.json'
+    
+    # Test benchmark flag
+    args = parse_args(['--benchmark'])
+    assert args.benchmark is True
