@@ -34,3 +34,19 @@ def test_dp_solver_solve_returns_tuple():
     
     value, sequence = result
     assert isinstance(value, int)
+
+def test_dp_solver_simple_no_defects():
+    """Test DP solver with simple case, no defects."""
+    # Single item 3x3, sheet 9x9 → should fit 9 items perfectly
+    item_sizes = [[3], [3]]
+    geom = SheetGeometry((9, 9), [[], []], [[], []])
+    patterns = CutPatternGenerator(item_sizes, geom)
+    
+    dp = GuillotineDP(item_sizes, geom, patterns)
+    value, sequence = dp.solve()
+    
+    # 9x9 sheet with 3x3 items → 9 items = 81 area
+    assert value == 81
+    
+    # Sequence should not be just "empty"
+    assert sequence != "empty"
