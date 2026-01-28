@@ -122,4 +122,45 @@ class GuillotineDP:
         
         return best_val, best_seq
     
-    
+    def _solve_defected(self, x, y, w, h):
+        """Solve for defected rectangle (contains defects).
+        
+        Similar to _solve_pure, but:
+        1. Cannot fill with single item (defect makes it unusable)
+        2. Cut positions include defect boundaries (to isolate defects)
+        3. Goal: Cut around defects to recover as much clear area as possible
+        
+        Example: Rectangle with defect at (10,10):
+                 ┌─────────┬───┬─────┐
+                 │  CLEAR  │DEF│CLEAR│  Cut at defect edges
+                 └─────────┴───┴─────┘
+                             ↑
+                        Defect isolated
+        """
+        best_val = 0
+        best_seq = "defect"  # Default: entire area is defected (unusable)
+        
+        # Get candidate cuts (includes normal patterns + defect boundaries)
+        x_cuts, y_cuts = self.patterns.cuts_defected(x, y, w, h)
+        
+        # Try vertical cuts - same logic as pure case
+        for z in x_cuts:
+            left_val, left_seq = self._F(x, y, z, h)
+            right_val, right_seq = self._F(x + z, y, w - z, h)
+            total = left_val + right_val
+            
+            if total > best_val:
+                best_val = total
+                best_seq = ("X", z, left_seq, right_seq)
+        
+        # Try horizontal cuts - same logic as pure case
+        for z in y_cuts:
+            bot_val, bot_seq = self._F(x, y, w, z)
+            top_val, top_seq = self._F(x, y + z, w, h - z)
+            total = bot_val + top_val
+            
+            if total > best_val:
+                best_val = total
+                best_seq = ("Y", z, bot_seq, top_seq)
+        
+        return best_val, best_seq
