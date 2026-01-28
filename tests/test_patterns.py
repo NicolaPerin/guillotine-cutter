@@ -131,3 +131,22 @@ def test_cuts_defected_basic():
     # Both should be lists
     assert isinstance(x_cuts, list)
     assert isinstance(y_cuts, list)
+
+def test_cuts_defected_no_overlap():
+    """Test cuts_defected when defect doesn't overlap rectangle."""
+    from guillotine.core.geometry import SheetGeometry
+    from guillotine.core.patterns import CutPatternGenerator
+    
+    geom = SheetGeometry(
+        (30, 30),
+        [[5], [5]],
+        [[20], [20]]  # Defect at (20,20), far away
+    )
+    gen = CutPatternGenerator([[3, 4], [3, 4]], geom)
+    
+    # Rectangle (0,0) size 10x10 - doesn't overlap defect
+    x_cuts, y_cuts = gen.cuts_defected(0, 0, 10, 10)
+    
+    # Should only have normal pattern cuts, no defect cuts
+    # (defect is at 20,20 - completely outside this rectangle)
+    assert 20 not in x_cuts  # Defect boundary shouldn't appear
