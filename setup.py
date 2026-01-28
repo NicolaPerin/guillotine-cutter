@@ -15,6 +15,7 @@ setup(
     description="Fast 2D guillotine cutting optimizer with defect handling",
     long_description=long_description,
     long_description_content_type="text/markdown",
+    license="MIT",
     packages=find_packages(where="src"),
     package_dir={"": "src"},
     install_requires=[
