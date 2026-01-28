@@ -100,3 +100,17 @@ def test_save_solution_json(tmp_path):
     assert "utilization" in sol
     assert "efficiency" in sol
     assert "cut_sequence" in sol
+
+def test_load_items_csv(tmp_path):
+    """Test loading items from CSV file."""
+    from guillotine.io import load_items_csv
+    
+    # Create CSV file
+    csv_file = tmp_path / "items.csv"
+    csv_file.write_text("width,height\n5,5\n10,10\n12,12\n")
+    
+    # Load it
+    item_sizes = load_items_csv(str(csv_file))
+    
+    # Should match
+    assert item_sizes == [[5, 10, 12], [5, 10, 12]]
