@@ -64,3 +64,47 @@ def load_problem_json(filepath):
         "defect_positions": defect_positions,
         "sheet_size": sheet_size
     }
+
+def save_solution_json(filepath, value, sequence, sheet_size, defect_area):
+    """Save solution to JSON file with all metrics."""
+    W, H = sheet_size
+    total_area = W * H
+    usable_area = total_area - defect_area
+    
+    # Calculate metrics
+    utilization_pct = (value / total_area) * 100
+    defect_loss_pct = (defect_area / total_area) * 100
+    efficiency_pct = (value / usable_area) * 100 if usable_area > 0 else 0
+    
+    solution = {
+        "solution": {
+            "cut_area": value,
+            "total_area": total_area,
+            "defect_area": defect_area,
+            "usable_area": usable_area,
+            "utilization": f"{value}/{total_area} ({utilization_pct:.1f}%)",
+            "defect_loss": f"{defect_area}/{total_area} ({defect_loss_pct:.1f}%)",
+            "efficiency": f"{value}/{usable_area} ({efficiency_pct:.1f}%)",
+            "cut_sequence": _serialize_sequence(sequence)
+        }
+    }
+    
+    with open(filepath, 'w') as f:
+        json.dump(solution, f, indent=2)
+
+def _serialize_sequence(seq):
+    """Convert nested tuple sequence to JSON-serializable dict."""
+    if isinstance(seq, str):
+        # Terminal node: "empty", "defect", "g_0", etc.
+        if seq.startswith("g_"):
+            return {"type": "fill", "item_id": int(seq.split("_")[1])}
+        return {"type": seq}
+    
+    # Recursive node: ("X"|"Y", position, left, right)
+    direction, z, left, right = seq
+    return {
+        "type": direction,
+        "position": int(z),
+        "left": _serialize_sequence(left),
+        "right": _serialize_sequence(right)
+    }
