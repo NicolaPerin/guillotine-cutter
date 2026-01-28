@@ -108,3 +108,24 @@ def _serialize_sequence(seq):
         "left": _serialize_sequence(left),
         "right": _serialize_sequence(right)
     }
+
+def load_items_csv(filepath):
+    """Load items from CSV file.
+    
+    Expected CSV format:
+        width,height
+        5,5
+        10,10
+    """
+    import csv
+    
+    widths = []
+    heights = []
+    
+    with open(filepath, 'r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            widths.append(int(row['width']))
+            heights.append(int(row['height']))
+    
+    return [widths, heights]
