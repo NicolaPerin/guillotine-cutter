@@ -69,3 +69,17 @@ def test_dp_solver_with_defect():
     
     # Sequence should involve cuts (not just "defect")
     assert sequence != "defect"
+
+def test_dp_solver_defect_covers_all():
+    """Test when defect covers entire sheet."""
+    # Sheet 10x10 with defect covering all
+    item_sizes = [[3], [3]]
+    geom = SheetGeometry((10, 10), [[10], [10]], [[0], [0]])
+    patterns = CutPatternGenerator(item_sizes, geom)
+    
+    dp = GuillotineDP(item_sizes, geom, patterns)
+    value, sequence = dp.solve()
+    
+    # No usable area
+    assert value == 0
+    assert sequence == "defect"
