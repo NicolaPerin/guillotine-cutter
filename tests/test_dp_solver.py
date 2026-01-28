@@ -18,3 +18,19 @@ def test_dp_solver_init():
     assert dp.H0 == 20
     assert dp.geom == geom
     assert dp.patterns == patterns
+
+def test_dp_solver_solve_returns_tuple():
+    """Test that solve() returns (value, sequence) tuple."""
+    item_sizes = [[3], [3]]
+    geom = SheetGeometry((10, 10), [[], []], [[], []])
+    patterns = CutPatternGenerator(item_sizes, geom)
+    
+    dp = GuillotineDP(item_sizes, geom, patterns)
+    result = dp.solve()
+    
+    # Should return tuple of (value, sequence)
+    assert isinstance(result, tuple)
+    assert len(result) == 2
+    
+    value, sequence = result
+    assert isinstance(value, int)
