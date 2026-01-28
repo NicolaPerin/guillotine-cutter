@@ -1,7 +1,11 @@
 """CLI entry point for guillotine cutting solver."""
 
 import argparse
-
+import time
+from guillotine.core.geometry import SheetGeometry
+from guillotine.core.patterns import CutPatternGenerator
+from guillotine.core.dp_solver import GuillotineDP
+from guillotine.io import save_solution_json
 
 def parse_args(argv=None):
     """Parse command line arguments."""
@@ -45,6 +49,8 @@ def parse_args(argv=None):
     )
     
     return parser.parse_args(argv)
+
+
 
 def main():
     """Main CLI function."""
