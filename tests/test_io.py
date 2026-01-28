@@ -129,3 +129,26 @@ def test_load_defects_csv(tmp_path):
     # Should match
     assert defect_sizes == [[2, 3], [2, 3]]
     assert defect_positions == [[9, 15], [9, 15]]
+
+def test_save_solution_with_simple_sequences(tmp_path):
+    """Test serializing simple string sequences like 'empty' and 'defect'."""
+    from guillotine.io import save_solution_json
+    
+    filepath = tmp_path / "solution_empty.json"
+    
+    # Test with "empty" sequence
+    save_solution_json(str(filepath), 0, "empty", (10, 10), 0)
+    
+    with open(filepath) as f:
+        data = json.load(f)
+    
+    assert data["solution"]["cut_sequence"] == {"type": "empty"}
+    
+    # Test with "defect" sequence
+    filepath2 = tmp_path / "solution_defect.json"
+    save_solution_json(str(filepath2), 0, "defect", (10, 10), 100)
+    
+    with open(filepath2) as f:
+        data = json.load(f)
+    
+    assert data["solution"]["cut_sequence"] == {"type": "defect"}
