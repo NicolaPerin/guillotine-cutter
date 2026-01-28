@@ -1,7 +1,7 @@
 # Guillotine Cutter
 
 [![CI](https://github.com/NicolaPerin/guillotine-cutter/actions/workflows/ci.yml/badge.svg)](https://github.com/NicolaPerin/guillotine-cutter/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/NicolaPerin/guillotine-cutter/branch/main/graph/badge.svg)](https://codecov.io/gh/NicolaPerin/guillotine-cutter)
+[![codecov](https://codecov.io/gh/NicolaPerin/guillotine-cutter/branch/develop/graph/badge.svg)](https://codecov.io/gh/NicolaPerin/guillotine-cutter)
 
 ## Features
 
