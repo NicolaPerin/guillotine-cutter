@@ -44,3 +44,28 @@ def test_cli_parse_output_and_benchmark():
     # Test benchmark flag
     args = parse_args(['--benchmark'])
     assert args.benchmark is True
+
+def test_cli_run_benchmark(tmp_path, capsys):
+    """Test running the benchmark."""
+    from guillotine.__main__ import main, parse_args
+    import sys
+    
+    # Set output path
+    output_file = tmp_path / "benchmark_solution.json"
+    
+    # Mock sys.argv
+    sys.argv = ['guillotine', '--benchmark', '--output', str(output_file)]
+    
+    # Run main
+    main()
+    
+    # Should create output file
+    assert output_file.exists()
+    
+    # Check output contains expected value
+    with open(output_file) as f:
+        import json
+        data = json.load(f)
+    
+    assert data["solution"]["cut_area"] == 644
+    assert data["solution"]["total_area"] == 729
