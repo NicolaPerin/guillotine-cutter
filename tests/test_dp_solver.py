@@ -50,3 +50,22 @@ def test_dp_solver_simple_no_defects():
     
     # Sequence should not be just "empty"
     assert sequence != "empty"
+
+def test_dp_solver_with_defect():
+    """Test DP solver with defect present."""
+    # Sheet 10x10 with defect at (5,5) size 2x2
+    # Item 3x3
+    item_sizes = [[3], [3]]
+    geom = SheetGeometry((10, 10), [[2], [2]], [[5], [5]])
+    patterns = CutPatternGenerator(item_sizes, geom)
+    
+    dp = GuillotineDP(item_sizes, geom, patterns)
+    value, sequence = dp.solve()
+    
+    # With defect, can't achieve 100 (perfect)
+    # Should get something less than 100
+    assert value < 100
+    assert value > 0  # But should get something
+    
+    # Sequence should involve cuts (not just "defect")
+    assert sequence != "defect"
