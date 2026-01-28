@@ -114,3 +114,18 @@ def test_load_items_csv(tmp_path):
     
     # Should match
     assert item_sizes == [[5, 10, 12], [5, 10, 12]]
+
+def test_load_defects_csv(tmp_path):
+    """Test loading defects from CSV file."""
+    from guillotine.io import load_defects_csv
+    
+    # Create CSV file
+    csv_file = tmp_path / "defects.csv"
+    csv_file.write_text("x,y,width,height\n9,9,2,2\n15,15,3,3\n")
+    
+    # Load it
+    defect_sizes, defect_positions = load_defects_csv(str(csv_file))
+    
+    # Should match
+    assert defect_sizes == [[2, 3], [2, 3]]
+    assert defect_positions == [[9, 15], [9, 15]]
