@@ -102,3 +102,20 @@ def test_cli_run_from_json(tmp_path):
     
     assert data["solution"]["total_area"] == 400
     assert data["solution"]["cut_area"] > 0
+
+def test_cli_error_no_input(capsys):
+    """Test error message when no input provided."""
+    from guillotine.__main__ import main
+    import sys
+    
+    # Run with no arguments
+    sys.argv = ['guillotine']
+    
+    result = main()
+    
+    # Should return error code
+    assert result == 1
+    
+    # Should print error message
+    captured = capsys.readouterr()
+    assert "Error" in captured.out
