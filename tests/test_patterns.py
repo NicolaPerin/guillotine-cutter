@@ -150,3 +150,17 @@ def test_cuts_defected_no_overlap():
     # Should only have normal pattern cuts, no defect cuts
     # (defect is at 20,20 - completely outside this rectangle)
     assert 20 not in x_cuts  # Defect boundary shouldn't appear
+
+def test_cuts_defected_tiny_rectangle():
+    """Test cuts_defected with tiny rectangle (w<=1 and h<=1)."""
+    from guillotine.core.geometry import SheetGeometry
+    from guillotine.core.patterns import CutPatternGenerator
+    
+    geom = SheetGeometry((20, 20), [[2], [2]], [[10], [10]])
+    gen = CutPatternGenerator([[3, 4], [3, 4]], geom)
+    
+    # Width and height both 1 - too small for any cuts
+    x_cuts, y_cuts = gen.cuts_defected(5, 5, 1, 1)
+    
+    assert x_cuts == []
+    assert y_cuts == []
