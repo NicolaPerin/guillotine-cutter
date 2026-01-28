@@ -2,7 +2,6 @@
 
 import json
 
-
 def save_problem_json(filepath, item_sizes, defect_sizes, defect_positions, sheet_size):
     """Save problem definition to JSON file."""
     problem = {
@@ -26,3 +25,42 @@ def save_problem_json(filepath, item_sizes, defect_sizes, defect_positions, shee
     
     with open(filepath, 'w') as f:
         json.dump(problem, f, indent=2)
+
+
+def load_problem_json(filepath):
+    """Load problem definition from JSON file."""
+    with open(filepath, 'r') as f:
+        data = json.load(f)
+    
+    problem = data["problem"]
+    
+    # Parse items
+    items = problem["items"]
+    item_sizes = [
+        [item["width"] for item in items],
+        [item["height"] for item in items]
+    ]
+    
+    # Parse defects
+    defects = problem.get("defects", [])
+    if defects:
+        defect_sizes = [
+            [d["width"] for d in defects],
+            [d["height"] for d in defects]
+        ]
+        defect_positions = [
+            [d["x"] for d in defects],
+            [d["y"] for d in defects]
+        ]
+    else:
+        defect_sizes = [[], []]
+        defect_positions = [[], []]
+    
+    sheet_size = tuple(problem["sheet_size"])
+    
+    return {
+        "item_sizes": item_sizes,
+        "defect_sizes": defect_sizes,
+        "defect_positions": defect_positions,
+        "sheet_size": sheet_size
+    }
