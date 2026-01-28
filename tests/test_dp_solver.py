@@ -83,3 +83,20 @@ def test_dp_solver_defect_covers_all():
     # No usable area
     assert value == 0
     assert sequence == "defect"
+
+def test_dp_solver_multiple_defects():
+    """Test with multiple defects."""
+    # Sheet 20x20 with two defects
+    item_sizes = [[3], [3]]
+    geom = SheetGeometry(
+        (20, 20),
+        [[2, 2], [2, 2]],
+        [[5, 15], [5, 15]]
+    )
+    patterns = CutPatternGenerator(item_sizes, geom)
+    
+    dp = GuillotineDP(item_sizes, geom, patterns)
+    value, sequence = dp.solve()
+    
+    # Should get something but less than perfect (400)
+    assert 0 < value < 400
