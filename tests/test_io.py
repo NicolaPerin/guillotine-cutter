@@ -152,3 +152,30 @@ def test_save_solution_with_simple_sequences(tmp_path):
         data = json.load(f)
     
     assert data["solution"]["cut_sequence"] == {"type": "defect"}
+
+def test_load_problem_json_no_defects(tmp_path):
+    """Test loading problem from JSON when no defects present."""
+    from guillotine.io import save_problem_json, load_problem_json
+    
+    filepath = tmp_path / "problem_no_defects.json"
+    
+    # Save problem with no defects
+    item_sizes = [[5, 10], [5, 10]]
+    defect_sizes = [[], []]
+    defect_positions = [[], []]
+    sheet_size = (20, 20)
+    
+    save_problem_json(
+        str(filepath),
+        item_sizes,
+        defect_sizes,
+        defect_positions,
+        sheet_size
+    )
+    
+    # Load it back
+    loaded = load_problem_json(str(filepath))
+    
+    # Should have empty defects
+    assert loaded["defect_sizes"] == [[], []]
+    assert loaded["defect_positions"] == [[], []]
