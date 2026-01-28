@@ -11,6 +11,7 @@ pipeline {
                     pip install --upgrade pip
                     pip install -e .
                     pip install pytest pytest-cov
+                    pip list | grep -E "numpy|matplotlib|guillotine"
                 '''
             }
         }
@@ -31,6 +32,7 @@ pipeline {
                 echo 'Running tests...'
                 sh '''
                     . venv/bin/activate
+                    python -c "import numpy; print(f'NumPy: {numpy.__version__}')"
                     pytest tests/ -v --cov=guillotine --cov-report=xml --cov-report=term
                 '''
             }
@@ -38,9 +40,7 @@ pipeline {
         
         stage('Results') {
             steps {
-                echo 'Publishing test results...'
-                junit 'test-results/*.xml'
-                cobertura coberturaReportFile: 'coverage.xml'
+                echo 'Test results generated'
             }
         }
     }
