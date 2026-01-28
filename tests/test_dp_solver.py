@@ -147,3 +147,31 @@ def test_dp_solver_paper_benchmark():
     # Utilization
     utilization = value / 729
     assert utilization > 0.88  # 644/729 ≈ 88.3%
+
+def test_dp_solver_items_too_large():
+    """Test when all items are larger than sheet."""
+    # Sheet 5x5, but all items are 10x10 or larger
+    item_sizes = [[10, 15], [10, 15]]
+    geom = SheetGeometry((5, 5), [[], []], [[], []])
+    patterns = CutPatternGenerator(item_sizes, geom)
+    
+    dp = GuillotineDP(item_sizes, geom, patterns)
+    value, sequence = dp.solve()
+    
+    # Nothing fits
+    assert value == 0
+    assert sequence == "empty"
+
+def test_dp_solver_perfect_single_item():
+    """Test when single item fills sheet perfectly."""
+    # Sheet 15x15, item 15x15 - perfect match
+    item_sizes = [[15], [15]]
+    geom = SheetGeometry((15, 15), [[], []], [[], []])
+    patterns = CutPatternGenerator(item_sizes, geom)
+    
+    dp = GuillotineDP(item_sizes, geom, patterns)
+    value, sequence = dp.solve()
+    
+    # Perfect utilization
+    assert value == 225  # 15*15
+    assert sequence == "g_0"  # Filled with item 0, no cuts
