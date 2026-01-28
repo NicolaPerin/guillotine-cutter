@@ -100,3 +100,21 @@ def test_dp_solver_multiple_defects():
     
     # Should get something but less than perfect (400)
     assert 0 < value < 400
+
+def test_dp_solver_zero_dimensions():
+    """Test with zero or negative dimensions."""
+    item_sizes = [[3], [3]]
+    geom = SheetGeometry((10, 10), [[], []], [[], []])
+    patterns = CutPatternGenerator(item_sizes, geom)
+    
+    dp = GuillotineDP(item_sizes, geom, patterns)
+    
+    # Directly call _F with zero dimensions
+    value, sequence = dp._F(0, 0, 0, 5)
+    assert value == 0
+    assert sequence == "empty"
+    
+    # Negative dimensions
+    value, sequence = dp._F(0, 0, -5, 5)
+    assert value == 0
+    assert sequence == "empty"
