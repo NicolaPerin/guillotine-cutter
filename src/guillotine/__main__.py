@@ -2,6 +2,9 @@
 
 import argparse
 import time
+import cProfile
+import pstats
+import io
 from guillotine.core.geometry import SheetGeometry
 from guillotine.core.patterns import CutPatternGenerator
 from guillotine.core.dp_solver import GuillotineDP
@@ -48,31 +51,65 @@ def parse_args(argv=None):
         help='Run paper benchmark case (27x27 sheet)'
     )
     
+    # Profiling
+    parser.add_argument(
+        '--profile',
+        help='Enable profiling and save to file',
+        metavar='PROFILE_FILE'
+    )
+
     return parser.parse_args(argv)
 
-def run_solver(item_sizes, defect_sizes, defect_positions, sheet_size, output_file):
+def run_solver(item_sizes, defect_sizes, defect_positions, sheet_size, output_file, profile_file=None):
     """Run the solver and save results."""
-    # Solve
-    geom = SheetGeometry(sheet_size, defect_sizes, defect_positions)
-    patterns = CutPatternGenerator(item_sizes, geom)
-    dp = GuillotineDP(item_sizes, geom, patterns)
     
-    start = time.time()
-    value, sequence = dp.solve()
-    solve_time = time.time() - start
+    def solve():
+        """Inner function for profiling."""
+        # Setup
+        geom = SheetGeometry(sheet_size, defect_sizes, defect_positions)
+        patterns = CutPatternGenerator(item_sizes, geom)
+        dp = GuillotineDP(item_sizes, geom, patterns)
+        
+        # Solve
+        start = time.time()
+        value, sequence = dp.solve()
+        solve_time = time.time() - start
+        
+        return value, sequence, solve_time
+    
+    # Run with or without profiling
+    if profile_file:
+        print(f"Profiling enabled, output: {profile_file}")
+        profiler = cProfile.Profile()
+        profiler.enable()
+        value, sequence, solve_time = solve()
+        profiler.disable()
+        
+        # Save profile to file
+        with open(profile_file, 'w') as f:
+            stats = pstats.Stats(profiler, stream=f)
+            stats.sort_stats('cumulative')
+            stats.print_stats(50)  # Top 50 functions
+        
+        print(f"Profile saved to: {profile_file}")
+    else:
+        value, sequence, solve_time = solve()
     
     # Calculate defect area
-    defect_area = sum(defect_sizes[0][i] * defect_sizes[1][i] for i in range(len(defect_sizes[0])))
+    defect_area = sum(defect_sizes[0][i] * defect_sizes[1][i] 
+                     for i in range(len(defect_sizes[0])))
     
     # Save solution
     save_solution_json(output_file, value, sequence, sheet_size, defect_area)
     
     # Print summary
     print(f"Solved in {solve_time:.3f}s")
-    print(f"Value: {value}/{sheet_size[0]*sheet_size[1]} ({value/(sheet_size[0]*sheet_size[1])*100:.1f}%)")
+    print(f"Value: {value}/{sheet_size[0]*sheet_size[1]} "
+          f"({value/(sheet_size[0]*sheet_size[1])*100:.1f}%)")
     print(f"Output saved to: {output_file}")
 
-def run_benchmark(output_file):
+
+def run_benchmark(output_file, profile_file=None):
     """Run the paper benchmark case."""
     print("Running paper benchmark (27x27 sheet)...")
     
@@ -82,10 +119,13 @@ def run_benchmark(output_file):
     defect_positions = [[9], [9]]
     sheet_size = (27, 27)
     
-    run_solver(item_sizes, defect_sizes, defect_positions, sheet_size, output_file)
+    run_solver(item_sizes, defect_sizes, defect_positions, 
+              sheet_size, output_file, profile_file)
 
-def run_from_json(input_file, output_file):
+def run_from_json(input_file, output_file, profile_file=None):
     """Run solver from JSON input file."""
+    from guillotine.io import load_problem_json
+    
     print(f"Loading problem from {input_file}...")
     
     # Load problem
@@ -96,7 +136,8 @@ def run_from_json(input_file, output_file):
         problem["defect_sizes"],
         problem["defect_positions"],
         problem["sheet_size"],
-        output_file
+        output_file,
+        profile_file
     )
 
 def main():
@@ -104,9 +145,9 @@ def main():
     args = parse_args()
     
     if args.benchmark:
-        run_benchmark(args.output)
+        run_benchmark(args.output, args.profile)
     elif args.input:
-        run_from_json(args.input, args.output)
+        run_from_json(args.input, args.output, args.profile)
     else:
         print("Error: Please specify --benchmark or provide input file")
         return 1
