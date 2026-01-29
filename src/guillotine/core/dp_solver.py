@@ -1,166 +1,268 @@
 """DP solver for guillotine cutting."""
 
+import numpy as np
+from guillotine.core.constants import (
+    NOT_COMPUTED,
+    DECISION_EMPTY,
+    DECISION_FILL,
+    DECISION_CUT_X,
+    DECISION_CUT_Y,
+    DECISION_DEFECT,
+    DECISION_PURE,
+)
+
 
 class GuillotineDP:
-    """Dynamic programming solver for guillotine cutting problem."""
+    """Optimized DP solver with bottom-up pure computation and sparse defect cache."""
     
     def __init__(self, item_sizes, geometry, patterns):
-        """Initialize DP solver."""
+        """Initialize solver and precompute pure rectangle values."""
         self.geom = geometry
         self.patterns = patterns
-        self.W0, self.H0 = geometry.W0, geometry.H0
-        self.item_sizes = item_sizes
+        self.W0 = geometry.W0
+        self.H0 = geometry.H0
         
-        # Memoization cache
-        self.memo = {}
-
-    def solve(self):
-        """Solve the cutting problem."""
-        return self._F(0, 0, self.W0, self.H0)
+        # Convert items to numpy for fast g computation
+        self.item_w = np.array(item_sizes[0], dtype=np.int32)
+        self.item_h = np.array(item_sizes[1], dtype=np.int32)
+        self.item_area = self.item_w * self.item_h
+        self.n_items = len(self.item_w)
+        
+        # Precompute g(w,h) for all dimensions
+        # g_values[w,h] = best area achievable by tiling with single item type
+        # g_indices[w,h] = which item achieves that (for reconstruction)
+        self._precompute_g()
+        
+        # Precompute F(w,h) bottom-up for all pure rectangles
+        # This eliminates ALL recursion for pure rectangles
+        self._precompute_F()
+        
+        # Sparse cache for defected rectangles: (x,y,w,h) -> (value, type, param)
+        # Much more memory-efficient than dense 4D array
+        self.cache_Fd = {}
     
-    def _F(self, x, y, w, h):
-        """Compute optimal value for rectangle (x, y, w, h)."""
-        # Base cases
+    def _precompute_g(self):
+        """Precompute best single-item-type tiling for all rectangle sizes.
+        
+        For each (w,h), find which item type gives maximum coverage.
+        
+        Time: O(W * H * n_items)
+        Space: O(W * H)
+        """
+        W0, H0 = self.W0, self.H0
+        n_items = self.n_items
+        item_w = self.item_w
+        item_h = self.item_h
+        item_area = self.item_area
+        
+        # Arrays to store results
+        g_values = np.zeros((W0 + 1, H0 + 1), dtype=np.int32)
+        g_indices = np.full((W0 + 1, H0 + 1), -1, dtype=np.int32)
+        
+        # For each rectangle size
+        for w in range(1, W0 + 1):
+            for h in range(1, H0 + 1):
+                best_val = 0
+                best_idx = -1
+                
+                # Try each item type
+                for i in range(n_items):
+                    # How many items fit in each direction?
+                    nx = w // item_w[i]
+                    ny = h // item_h[i]
+                    
+                    if nx > 0 and ny > 0:
+                        val = item_area[i] * nx * ny
+                        if val > best_val:
+                            best_val = val
+                            best_idx = i
+                
+                g_values[w, h] = best_val
+                g_indices[w, h] = best_idx
+        
+        self.g_values = g_values
+        self.g_indices = g_indices
+    
+    def _precompute_F(self):
+        """Precompute optimal values for all pure rectangles bottom-up.
+        
+        F(w,h) = max of:
+          - g(w,h): tile with single item type
+          - max over z: F(z,h) + F(w-z,h)  [vertical cut]
+          - max over z: F(w,z) + F(w,h-z)  [horizontal cut]
+        
+        By processing in order of increasing w and h, all subproblems
+        are solved before we need them.
+        
+        Time: O(W * H * max_cuts)
+        Space: O(W * H)
+        """
+        W0, H0 = self.W0, self.H0
+        patterns = self.patterns
+        g_values = self.g_values
+        g_indices = self.g_indices
+        
+        # Arrays for F values and decisions
+        F_values = np.zeros((W0 + 1, H0 + 1), dtype=np.int32)
+        F_type = np.zeros((W0 + 1, H0 + 1), dtype=np.int8)
+        F_param = np.zeros((W0 + 1, H0 + 1), dtype=np.int32)
+        
+        # Process in order of increasing dimensions
+        for w in range(1, W0 + 1):
+            for h in range(1, H0 + 1):
+                # Start with tiling option
+                best_val = g_values[w, h]
+                best_type = DECISION_FILL if g_indices[w, h] >= 0 else DECISION_EMPTY
+                best_param = g_indices[w, h] if g_indices[w, h] >= 0 else 0
+                
+                # Try vertical cuts (exploit symmetry: only z <= w/2)
+                half_w = w >> 1
+                for z in patterns.cuts_pure_x(w):
+                    if z > half_w:
+                        break
+                    total = F_values[z, h] + F_values[w - z, h]
+                    if total > best_val:
+                        best_val = total
+                        best_type = DECISION_CUT_X
+                        best_param = z
+                
+                # Try horizontal cuts (exploit symmetry: only z <= h/2)
+                half_h = h >> 1
+                for z in patterns.cuts_pure_y(h):
+                    if z > half_h:
+                        break
+                    total = F_values[w, z] + F_values[w, h - z]
+                    if total > best_val:
+                        best_val = total
+                        best_type = DECISION_CUT_Y
+                        best_param = z
+                
+                F_values[w, h] = best_val
+                F_type[w, h] = best_type
+                F_param[w, h] = best_param
+        
+        self.F_values = F_values
+        self.F_type = F_type
+        self.F_param = F_param
+    
+    def F(self, w, h):
+        """Get precomputed pure rectangle value. O(1)."""
         if w <= 0 or h <= 0:
-            return 0, "empty"
-        
-        # Check memo
-        key = (x, y, w, h)
-        if key in self.memo:
-            return self.memo[key]
-        
-        # Check if pure (no defects)
-        if self.geom.is_pure(x, y, w, h):
-            result = self._solve_pure(x, y, w, h)
-        else:
-            result = self._solve_defected(x, y, w, h)
-        
-        self.memo[key] = result
-        return result
-
-    def _solve_pure(self, x, y, w, h):
-        """Solve for pure rectangle (no defects).
-        
-        This is the core DP recursion. For a rectangle (x,y) with size (w,h),
-        we try three strategies and pick the best:
-        
-        Strategy 1: FILL WITH SINGLE ITEM
-            If an item exactly matches (w,h), fill the entire rectangle.
-            Value = w * h (entire area used)
-            
-            Example: Rectangle 3x3, have item 3x3 → fill it!
-            
-        Strategy 2: VERTICAL CUT (X direction)
-            Make a vertical cut at position z, creating two sub-rectangles:
-            - Left piece:  (x, y, z, h)
-            - Right piece: (x+z, y, w-z, h)
-            
-            Recursively solve both pieces, sum their values.
-            
-            Example: Rectangle 6x3
-                     Cut at z=3:
-                     ┌───┬───┐
-                     │ L │ R │  L=3x3, R=3x3
-                     └───┴───┘
-                     
-        Strategy 3: HORIZONTAL CUT (Y direction)
-            Make a horizontal cut at position z, creating two sub-rectangles:
-            - Bottom piece: (x, y, w, z)
-            - Top piece:    (x, y+z, w, h-z)
-            
-            Recursively solve both pieces, sum their values.
-            
-            Example: Rectangle 3x6
-                     Cut at z=3:
-                     ┌───┐
-                     │ T │  T=3x3 (top)
-                     ├───┤
-                     │ B │  B=3x3 (bottom)
-                     └───┘
-        
-        The DP nature:
-            F(w,h) = max of:
-                     - fill with item if exact match
-                     - max over all z: F(z,h) + F(w-z,h)  [X cuts]
-                     - max over all z: F(w,z) + F(w,h-z)  [Y cuts]
-        
-        Memoization ensures we don't recompute the same subproblem twice.
-        """
-
-        best_val = 0
-        best_seq = "empty"
-        
-        # Strategy 1: Try filling with single item
-        for i, (iw, ih) in enumerate(zip(self.item_sizes[0], self.item_sizes[1])):
-            if iw == w and ih == h:
-                # Item fits exactly!
-                if w * h > best_val:
-                    best_val = w * h
-                    best_seq = f"g_{i}"
-        
-        # Strategy 2: Try all vertical cuts (X direction)
-        for z in self.patterns.cuts_pure_x(w):
-            # Cut creates: left piece (width z) and right piece (width w-z)
-            left_val, left_seq = self._F(x, y, z, h)
-            right_val, right_seq = self._F(x + z, y, w - z, h)
-            total = left_val + right_val
-            
-            if total > best_val:
-                best_val = total
-                best_seq = ("X", z, left_seq, right_seq)
-        
-        # Strategy 3: Try all horizontal cuts (Y direction)
-        for z in self.patterns.cuts_pure_y(h):
-            # Cut creates: bottom piece (height z) and top piece (height h-z)
-            bot_val, bot_seq = self._F(x, y, w, z)
-            top_val, top_seq = self._F(x, y + z, w, h - z)
-            total = bot_val + top_val
-            
-            if total > best_val:
-                best_val = total
-                best_seq = ("Y", z, bot_seq, top_seq)
-        
-        return best_val, best_seq
+            return 0
+        return int(self.F_values[w, h])
     
-    def _solve_defected(self, x, y, w, h):
-        """Solve for defected rectangle (contains defects).
+    def F_d(self, x, y, w, h):
+        """Compute optimal value for potentially defected rectangle.
         
-        Similar to _solve_pure, but:
-        1. Cannot fill with single item (defect makes it unusable)
-        2. Cut positions include defect boundaries (to isolate defects)
-        3. Goal: Cut around defects to recover as much clear area as possible
-        
-        Example: Rectangle with defect at (10,10):
-                 ┌─────────┬───┬─────┐
-                 │  CLEAR  │DEF│CLEAR│  Cut at defect edges
-                 └─────────┴───┴─────┘
-                             ↑
-                        Defect isolated
+        Uses recursion only for defected regions (sparse).
+        Pure regions use precomputed F values directly.
         """
+        if w <= 0 or h <= 0:
+            return 0
+        
+        # Check cache
+        key = (x, y, w, h)
+        cached = self.cache_Fd.get(key)
+        if cached is not None:
+            return cached[0]
+        
+        # If pure, use precomputed value
+        if self.geom.is_pure(x, y, w, h):
+            val = self.F_values[w, h]
+            self.cache_Fd[key] = (int(val), DECISION_PURE, 0)
+            return int(val)
+        
+        # Defected: must cut around defects
         best_val = 0
-        best_seq = "defect"  # Default: entire area is defected (unusable)
+        best_type = DECISION_DEFECT
+        best_param = 0
         
-        # Get candidate cuts (includes normal patterns + defect boundaries)
-        x_cuts, y_cuts = self.patterns.cuts_defected(x, y, w, h)
+        # Get cuts including defect boundaries
+        X_cuts, Y_cuts = self.patterns.cuts_defected(x, y, w, h)
         
-        # Try vertical cuts - same logic as pure case
-        for z in x_cuts:
-            left_val, left_seq = self._F(x, y, z, h)
-            right_val, right_seq = self._F(x + z, y, w - z, h)
-            total = left_val + right_val
-            
+        # Try vertical cuts
+        for z in X_cuts:
+            total = self.F_d(x, y, z, h) + self.F_d(x + z, y, w - z, h)
             if total > best_val:
                 best_val = total
-                best_seq = ("X", z, left_seq, right_seq)
+                best_type = DECISION_CUT_X
+                best_param = z
         
-        # Try horizontal cuts - same logic as pure case
-        for z in y_cuts:
-            bot_val, bot_seq = self._F(x, y, w, z)
-            top_val, top_seq = self._F(x, y + z, w, h - z)
-            total = bot_val + top_val
-            
+        # Try horizontal cuts  
+        for z in Y_cuts:
+            total = self.F_d(x, y, w, z) + self.F_d(x, y + z, w, h - z)
             if total > best_val:
                 best_val = total
-                best_seq = ("Y", z, bot_seq, top_seq)
+                best_type = DECISION_CUT_Y
+                best_param = z
         
-        return best_val, best_seq
+        self.cache_Fd[key] = (best_val, best_type, best_param)
+        return best_val
+    
+    def solve(self):
+        """Solve the cutting problem and return (value, sequence)."""
+        value = self.F_d(0, 0, self.W0, self.H0)
+        sequence = self._reconstruct_Fd(0, 0, self.W0, self.H0)
+        return value, sequence
+    
+    def _reconstruct_F(self, w, h):
+        """Reconstruct cutting sequence for pure rectangle."""
+        if w <= 0 or h <= 0:
+            return 'empty'
+        
+        dec_type = self.F_type[w, h]
+        dec_param = self.F_param[w, h]
+        
+        if dec_type == DECISION_EMPTY:
+            return 'empty'
+        
+        if dec_type == DECISION_FILL:
+            return f'g_{dec_param}'
+        
+        if dec_type == DECISION_CUT_X:
+            z = int(dec_param)
+            return ('X', z, self._reconstruct_F(z, h), self._reconstruct_F(w - z, h))
+        
+        if dec_type == DECISION_CUT_Y:
+            z = int(dec_param)
+            return ('Y', z, self._reconstruct_F(w, z), self._reconstruct_F(w, h - z))
+        
+        return 'empty'
+    
+    def _reconstruct_Fd(self, x, y, w, h):
+        """Reconstruct cutting sequence for potentially defected rectangle."""
+        if w <= 0 or h <= 0:
+            return 'empty'
+        
+        cached = self.cache_Fd.get((x, y, w, h))
+        if cached is None:
+            # Should not happen if solve() was called
+            return 'empty'
+        
+        _, dec_type, dec_param = cached
+        
+        if dec_type == DECISION_PURE:
+            return self._reconstruct_F(w, h)
+        
+        if dec_type == DECISION_EMPTY:
+            return 'empty'
+        
+        if dec_type == DECISION_DEFECT:
+            return 'defect'
+        
+        if dec_type == DECISION_FILL:
+            return f'g_{dec_param}'
+        
+        if dec_type == DECISION_CUT_X:
+            z = int(dec_param)
+            left = self._reconstruct_Fd(x, y, z, h)
+            right = self._reconstruct_Fd(x + z, y, w - z, h)
+            return ('X', z, left, right)
+        
+        if dec_type == DECISION_CUT_Y:
+            z = int(dec_param)
+            bot = self._reconstruct_Fd(x, y, w, z)
+            top = self._reconstruct_Fd(x, y + z, w, h - z)
+            return ('Y', z, bot, top)
+        
+        return 'empty'

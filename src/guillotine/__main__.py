@@ -19,6 +19,7 @@ def parse_args(argv=None):
     # Input method 1: JSON file
     parser.add_argument(
         'input',
+        
         nargs='?',
         help='Input JSON file'
     )

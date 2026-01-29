@@ -102,22 +102,29 @@ def test_dp_solver_multiple_defects():
     assert 0 < value < 400
 
 def test_dp_solver_zero_dimensions():
-    """Test with zero or negative dimensions."""
+    """Test with zero or negative dimensions via F and F_d methods."""
     item_sizes = [[3], [3]]
     geom = SheetGeometry((10, 10), [[], []], [[], []])
     patterns = CutPatternGenerator(item_sizes, geom)
     
     dp = GuillotineDP(item_sizes, geom, patterns)
     
-    # Directly call _F with zero dimensions
-    value, sequence = dp._F(0, 0, 0, 5)
-    assert value == 0
-    assert sequence == "empty"
+    # Test F (pure rectangle) with zero dimensions
+    assert dp.F(0, 5) == 0
+    assert dp.F(5, 0) == 0
+    assert dp.F(0, 0) == 0
     
-    # Negative dimensions
-    value, sequence = dp._F(0, 0, -5, 5)
-    assert value == 0
-    assert sequence == "empty"
+    # Test F with negative dimensions
+    assert dp.F(-5, 5) == 0
+    assert dp.F(5, -5) == 0
+    
+    # Test F_d (defected rectangle) with zero dimensions
+    assert dp.F_d(0, 0, 0, 5) == 0
+    assert dp.F_d(0, 0, 5, 0) == 0
+    
+    # Test F_d with negative dimensions
+    assert dp.F_d(0, 0, -5, 5) == 0
+    assert dp.F_d(0, 0, 5, -5) == 0
 
 def test_dp_solver_paper_benchmark():
     """Test benchmark case from original paper.
