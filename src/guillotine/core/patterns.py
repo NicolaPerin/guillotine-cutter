@@ -1,5 +1,6 @@
 """Pattern generation for guillotine cuts."""
 
+
 def compute_normal_patterns(item_sizes, max_L):
     """Compute reachable cut positions using DP."""
     sizes = sorted(set(int(s) for s in item_sizes if s > 0))
@@ -17,6 +18,7 @@ def compute_normal_patterns(item_sizes, max_L):
     
     return patterns
 
+
 class CutPatternGenerator:
     """Generates candidate cut positions."""
     
@@ -25,46 +27,15 @@ class CutPatternGenerator:
         self.geom = geometry
         self.W0, self.H0 = geometry.W0, geometry.H0
         
-        # NEW: Store min item sizes for filtering
-        self.min_item_w = min(item_sizes[0]) if item_sizes[0] else 1
-        self.min_item_h = min(item_sizes[1]) if item_sizes[1] else 1
-        
         # Precompute normal patterns for both directions
         self.np_x = compute_normal_patterns(item_sizes[0], self.W0)
         self.np_y = compute_normal_patterns(item_sizes[1], self.H0)
-        
-        # NEW: Filter patterns to remove cuts that create too-small pieces
-        self._filter_patterns()
         
         # Pre-allocate scratch buffers (reused to avoid allocations)
         self._x_mask = [False] * (self.W0 + 1)
         self._y_mask = [False] * (self.H0 + 1)
         self._x_buf = [0] * (self.W0 + 1)
         self._y_buf = [0] * (self.H0 + 1)
-
-    def _filter_patterns(self):
-        """Remove cuts that create pieces too small for any item.
-        
-        A cut at position z divides a rectangle of size L into two pieces:
-        - Piece 1: size z
-        - Piece 2: size L - z
-        
-        If either piece is smaller than the minimum item size, the cut is
-        useless and can be eliminated. This reduces the search space without
-        affecting optimality.
-        """
-        min_w = self.min_item_w
-        min_h = self.min_item_h
-        
-        # Filter X patterns: both pieces must be >= min_w
-        for L in list(self.np_x.keys()):
-            self.np_x[L] = [z for z in self.np_x[L] 
-                           if z >= min_w and (L - z) >= min_w]
-        
-        # Filter Y patterns: both pieces must be >= min_h
-        for L in list(self.np_y.keys()):
-            self.np_y[L] = [z for z in self.np_y[L] 
-                           if z >= min_h and (L - z) >= min_h]
     
     def cuts_pure_x(self, w):
         """Get valid X cuts for pure rectangle of width w."""
