@@ -6,6 +6,14 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
 
+"""Visualization for guillotine cutting solutions."""
+
+import matplotlib
+matplotlib.use('Agg')  # Non-interactive backend for saving files
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+
+
 class CuttingVisualizer:
     """Visualizes cutting patterns."""
     
@@ -31,6 +39,16 @@ class CuttingVisualizer:
             (0, 0), W0, H0,
             linewidth=2, edgecolor='k', facecolor='lightgrey', hatch='//'
         ))
+        
+        # Draw defects (black rectangles)
+        for i in range(len(self.defect_sizes[0])):
+            ax.add_patch(plt.Rectangle(
+                (self.defect_positions[0][i], self.defect_positions[1][i]),
+                self.defect_sizes[0][i], self.defect_sizes[1][i],
+                linewidth=1, edgecolor='k', facecolor='k'
+            ))
+        
+        # TODO: Draw cutting sequence
         
         # Save
         plt.savefig(output_file, dpi=150, bbox_inches='tight')
