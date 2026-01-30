@@ -119,3 +119,22 @@ def test_cli_error_no_input(capsys):
     # Should print error message
     captured = capsys.readouterr()
     assert "Error" in captured.out
+
+def test_cli_with_plot(tmp_path):
+    """Test CLI with plot generation."""
+    from guillotine.__main__ import main
+    import sys
+    
+    output_file = tmp_path / "solution.json"
+    plot_file = tmp_path / "test_plot.png"
+    
+    sys.argv = ['guillotine', '--benchmark', 
+                '--output', str(output_file),
+                '--plot', str(plot_file)]
+    
+    result = main()
+    
+    assert result == 0
+    assert output_file.exists()
+    assert plot_file.exists()
+    assert plot_file.stat().st_size > 0
