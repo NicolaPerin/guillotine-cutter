@@ -4,11 +4,11 @@ import argparse
 import time
 import cProfile
 import pstats
-import io
 from guillotine.core.geometry import SheetGeometry
 from guillotine.core.patterns import CutPatternGenerator
 from guillotine.core.dp_solver import GuillotineDP
 from guillotine.io import save_solution_json, load_problem_json
+
 
 def parse_args(argv=None):
     """Parse command line arguments."""
@@ -19,7 +19,6 @@ def parse_args(argv=None):
     # Input method 1: JSON file
     parser.add_argument(
         'input',
-        
         nargs='?',
         help='Input JSON file'
     )
@@ -45,6 +44,15 @@ def parse_args(argv=None):
         default='solution.json'
     )
     
+    # Visualization
+    parser.add_argument(
+        '--plot',
+        nargs='?',
+        const='plot.png',
+        metavar='IMAGE_FILE',
+        help='Generate visualization (default: plot.png)'
+    )
+    
     # Built-in test
     parser.add_argument(
         '--benchmark',
@@ -61,7 +69,9 @@ def parse_args(argv=None):
 
     return parser.parse_args(argv)
 
-def run_solver(item_sizes, defect_sizes, defect_positions, sheet_size, output_file, profile_file=None):
+
+def run_solver(item_sizes, defect_sizes, defect_positions, sheet_size, 
+               output_file, profile_file=None, plot_file=None):
     """Run the solver and save results."""
     
     def solve():
@@ -103,6 +113,14 @@ def run_solver(item_sizes, defect_sizes, defect_positions, sheet_size, output_fi
     # Save solution
     save_solution_json(output_file, value, sequence, sheet_size, defect_area)
     
+    # Generate visualization if requested
+    if plot_file:
+        from guillotine.visualize import CuttingVisualizer
+        print(f"Generating visualization: {plot_file}")
+        viz = CuttingVisualizer(item_sizes, defect_sizes, defect_positions, sheet_size)
+        viz.plot(sequence, plot_file)
+        print(f"Plot saved to: {plot_file}")
+    
     # Print summary
     print(f"Solved in {solve_time:.3f}s")
     print(f"Value: {value}/{sheet_size[0]*sheet_size[1]} "
@@ -110,7 +128,7 @@ def run_solver(item_sizes, defect_sizes, defect_positions, sheet_size, output_fi
     print(f"Output saved to: {output_file}")
 
 
-def run_benchmark(output_file, profile_file=None):
+def run_benchmark(output_file, profile_file=None, plot_file=None):
     """Run the paper benchmark case."""
     print("Running paper benchmark (27x27 sheet)...")
     
@@ -121,12 +139,11 @@ def run_benchmark(output_file, profile_file=None):
     sheet_size = (27, 27)
     
     run_solver(item_sizes, defect_sizes, defect_positions, 
-              sheet_size, output_file, profile_file)
+              sheet_size, output_file, profile_file, plot_file)
 
-def run_from_json(input_file, output_file, profile_file=None):
+
+def run_from_json(input_file, output_file, profile_file=None, plot_file=None):
     """Run solver from JSON input file."""
-    from guillotine.io import load_problem_json
-    
     print(f"Loading problem from {input_file}...")
     
     # Load problem
@@ -138,22 +155,25 @@ def run_from_json(input_file, output_file, profile_file=None):
         problem["defect_positions"],
         problem["sheet_size"],
         output_file,
-        profile_file
+        profile_file,
+        plot_file
     )
+
 
 def main():
     """Main CLI function."""
     args = parse_args()
     
     if args.benchmark:
-        run_benchmark(args.output, args.profile)
+        run_benchmark(args.output, args.profile, args.plot)
     elif args.input:
-        run_from_json(args.input, args.output, args.profile)
+        run_from_json(args.input, args.output, args.profile, args.plot)
     else:
         print("Error: Please specify --benchmark or provide input file")
         return 1
     
     return 0
+
 
 if __name__ == "__main__":
     exit(main())
