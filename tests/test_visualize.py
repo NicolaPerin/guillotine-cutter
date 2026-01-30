@@ -78,3 +78,23 @@ def test_plot_with_cuts(tmp_path):
     
     assert output_file.exists()
     assert output_file.stat().st_size > 0
+
+def test_plot_with_horizontal_cut(tmp_path):
+    """Test plotting with horizontal cut."""
+    from guillotine.visualize import CuttingVisualizer
+    
+    item_sizes = [[5], [5]]
+    defect_sizes = [[], []]
+    defect_positions = [[], []]
+    sheet_size = (10, 10)
+    
+    viz = CuttingVisualizer(item_sizes, defect_sizes, defect_positions, sheet_size)
+    
+    # Sequence with a horizontal cut
+    sequence = ("Y", 5, "g_0", "g_0")
+    output_file = tmp_path / "test_horizontal.png"
+    
+    viz.plot(sequence, str(output_file))
+    
+    assert output_file.exists()
+    assert output_file.stat().st_size > 0
