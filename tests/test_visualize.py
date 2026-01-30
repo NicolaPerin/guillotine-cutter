@@ -39,3 +39,22 @@ def test_save_plot(tmp_path):
     assert output_file.exists()
     # Should be a valid image file (check size > 0)
     assert output_file.stat().st_size > 0
+
+def test_plot_with_defects(tmp_path):
+    """Test plotting with defects."""
+    from guillotine.visualize import CuttingVisualizer
+    
+    item_sizes = [[5], [5]]
+    defect_sizes = [[2, 3], [2, 3]]
+    defect_positions = [[5, 10], [5, 10]]
+    sheet_size = (20, 20)
+    
+    viz = CuttingVisualizer(item_sizes, defect_sizes, defect_positions, sheet_size)
+    
+    sequence = "g_0"
+    output_file = tmp_path / "test_defects.png"
+    
+    viz.plot(sequence, str(output_file))
+    
+    assert output_file.exists()
+    assert output_file.stat().st_size > 0
