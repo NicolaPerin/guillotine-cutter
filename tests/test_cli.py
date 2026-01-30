@@ -138,3 +138,28 @@ def test_cli_with_plot(tmp_path):
     assert output_file.exists()
     assert plot_file.exists()
     assert plot_file.stat().st_size > 0
+
+def test_cli_with_profiling(tmp_path):
+    """Test CLI with profiling enabled."""
+    from guillotine.__main__ import main
+    import sys
+    
+    output_file = tmp_path / "solution.json"
+    profile_file = tmp_path / "profile.txt"
+    
+    sys.argv = ['guillotine', '--benchmark',
+                '--output', str(output_file),
+                '--profile', str(profile_file)]
+    
+    result = main()
+    
+    assert result == 0
+    assert output_file.exists()
+    assert profile_file.exists()
+    assert profile_file.stat().st_size > 0
+    
+    # Check profile contains expected content
+    with open(profile_file) as f:
+        content = f.read()
+        assert 'function calls' in content
+        assert 'cumulative' in content
