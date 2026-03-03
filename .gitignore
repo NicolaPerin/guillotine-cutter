@@ -11,3 +11,6 @@ __pycache__/
 # Coverage reports
 .coverage
 htmlcov/
+
+# CLI output
+output/
