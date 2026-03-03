@@ -1,18 +1,13 @@
 # Guillotine Cutter
-
 [![CI](https://github.com/NicolaPerin/guillotine-cutter/actions/workflows/ci.yml/badge.svg)](https://github.com/NicolaPerin/guillotine-cutter/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/NicolaPerin/guillotine-cutter/branch/develop/graph/badge.svg)](https://codecov.io/gh/NicolaPerin/guillotine-cutter)
 
 ## Features
-
-- Fast dynamic programming algorithm  
+- Fast dynamic programming algorithm
 - Handles defects and irregular regions
 - JSON and CSV input support
-- Command-line interface
-
-## Status
-
-🚧 Work in progress - migrating from Jupyter notebook to production package.
+- Command-line interface with `benchmark` and `solve` subcommands
+- Inline problem definition via `--sheet`, `--items`, and `--defects` flags
 
 ## Installation
 
@@ -41,22 +36,47 @@ sheet_size = (27, 27)
 geom = SheetGeometry(sheet_size, defect_sizes, defect_positions)
 patterns = CutPatternGenerator(item_sizes, geom)
 dp = GuillotineDP(item_sizes, geom, patterns)
-
 value, sequence = dp.solve()
 print(f"Optimal value: {value}")
 ```
 
 ### CLI Usage
-```bash
-# Run benchmark with visualization
-python -m guillotine --benchmark --plot
 
-# From JSON file with custom output
-python -m guillotine problem.json --output solution.json --plot result.png
+The CLI uses two subcommands: `benchmark` and `solve`.
+
+```bash
+# Run the built-in 27x27 benchmark
+guillotine benchmark
+
+# Run benchmark with visualization and profiling
+guillotine benchmark --plot --profile
+
+# Solve from a JSON file
+guillotine solve problem.json
+
+# Solve inline (sheet + items + optional defects)
+guillotine solve --sheet 27x27 --items 5x5 10x10 12x12 --defects 9,9,2x2
+
+# Save output to a custom file with a plot
+guillotine solve problem.json -o my_solution.json --plot result.png
 
 # With profiling
-python -m guillotine --benchmark --profile profile.txt
+guillotine solve --sheet 27x27 --items 5x5 10x10 --profile
 ```
+
+All outputs (JSON, PNG, profile) are saved to `./output/` by default unless a path with a directory is specified.
+
+#### Subcommand reference
+
+| Flag | `benchmark` | `solve` | Description |
+|---|---|---|---|
+| `--plot [FILE]` | ✓ | ✓ | Save visualization (default: `plot.png`) |
+| `--profile [FILE]` | ✓ | ✓ | Save profiling data (default: `profiling.txt`) |
+| `-o / --output FILE` | ✓ | ✓ | Output JSON file (default: `solution.json`) |
+| `--sheet WxH` | | ✓ | Sheet dimensions for inline mode |
+| `--items WxH ...` | | ✓ | Item sizes for inline mode |
+| `--defects X,Y,WxH ...` | | ✓ | Defect positions/sizes for inline mode |
+
 ### Input Formats
 
 **JSON format** (`problem.json`):
@@ -75,8 +95,8 @@ python -m guillotine --benchmark --profile profile.txt
 }
 ```
 
-**CSV format**:
-```bash
+**CSV format** (loadable via Python API):
+```
 # items.csv
 width,height
 5,5
@@ -90,15 +110,15 @@ x,y,width,height
 ## Output
 
 The solver generates:
-- **JSON solution** with metrics (utilization, efficiency, cut sequence)
+- **JSON solution** with metrics (utilization, efficiency, cut sequence) saved to `./output/`
 - **PNG visualization** (optional) showing the cutting pattern
 - **Profile data** (optional) for performance analysis
 
-
 ## Development
+
 ```bash
 # Install in development mode
-pip install -e .
+pip install -e .[dev]
 
 # Run all tests
 pytest tests/ -v
@@ -108,6 +128,7 @@ pytest tests/ --cov=guillotine --cov-report=term
 ```
 
 ## Architecture
+
 ```
 guillotine-cutter/
 ├── src/guillotine/
@@ -126,7 +147,7 @@ guillotine-cutter/
 This project is inspired by the guillotine cutting approach for 2D cutting stock problems with defects described in:
 
 H. Zhang, S. Yao, Q. Liu, J. Leng, and L. Wei,  
-“Exact approaches for the unconstrained two-dimensional cutting problem with defects,”  
+"Exact approaches for the unconstrained two-dimensional cutting problem with defects,"  
 *Computers & Operations Research*, vol. 160, 106407, 2023.  
 [https://doi.org/10.1016/j.cor.2023.106407](https://doi.org/10.1016/j.cor.2023.106407)
 
