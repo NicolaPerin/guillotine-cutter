@@ -8,7 +8,7 @@ import pstats
 from guillotine.core.geometry import SheetGeometry
 from guillotine.core.patterns import CutPatternGenerator
 from guillotine.core.dp_solver import GuillotineDP
-from guillotine.io import save_solution_json, load_problem_json
+from guillotine.io import save_solution_json, load_problem_json, validate_problem
 
 
 def ensure_output_path(filepath):
@@ -271,6 +271,12 @@ def main(argv=None):
             else:
                 defect_sizes = [[], []]
                 defect_positions = [[], []]
+
+            try:
+                validate_problem(item_sizes, defect_sizes, defect_positions, (w, h))
+            except ValueError as e:
+                print(f"Error: {e}")
+                return 1
 
             run_solver(
                 item_sizes,

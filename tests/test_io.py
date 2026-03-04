@@ -2,8 +2,7 @@
 
 import pytest
 import json
-import os
-from guillotine.io import save_problem_json
+from guillotine.io import save_problem_json, validate_problem
 
 
 def test_save_problem_json(tmp_path):
@@ -179,3 +178,75 @@ def test_load_problem_json_no_defects(tmp_path):
     # Should have empty defects
     assert loaded["defect_sizes"] == [[], []]
     assert loaded["defect_positions"] == [[], []]
+
+
+VALID = {
+    "item_sizes": [[5, 10], [5, 10]],
+    "defect_sizes": [[2], [2]],
+    "defect_positions": [[9], [9]],
+    "sheet_size": (27, 27),
+}
+
+def valid(**overrides):
+    return {**VALID, **overrides}
+
+
+# --- sheet ---
+@pytest.mark.parametrize("sheet_size", [(0, 27), (27, 0), (-1, 27), (0, 0)])
+def test_invalid_sheet(sheet_size):
+    with pytest.raises(ValueError, match="Sheet"):
+        validate_problem(**valid(sheet_size=sheet_size))
+
+
+# --- items ---
+def test_no_items():
+    with pytest.raises(ValueError, match="least one item"):
+        validate_problem(**valid(item_sizes=[[], []]))
+
+@pytest.mark.parametrize("item_sizes", [
+    [[0, 10], [5, 10]],   # zero width
+    [[5, 10], [0, 10]],   # zero height
+    [[-1, 10], [5, 10]],  # negative
+])
+def test_item_nonpositive_dimensions(item_sizes):
+    with pytest.raises(ValueError, match="Item"):
+        validate_problem(**valid(item_sizes=item_sizes))
+
+def test_item_larger_than_sheet():
+    with pytest.raises(ValueError, match="larger than the sheet"):
+        validate_problem(**valid(item_sizes=[[30], [5]], sheet_size=(27, 27)))
+
+
+# --- defects ---
+@pytest.mark.parametrize("defect_sizes", [
+    [[0], [2]],   # zero width
+    [[2], [0]],   # zero height
+])
+def test_defect_nonpositive_dimensions(defect_sizes):
+    with pytest.raises(ValueError, match="Defect"):
+        validate_problem(**valid(defect_sizes=defect_sizes))
+
+@pytest.mark.parametrize("defect_positions", [
+    [[-1], [9]],  # negative x
+    [[9], [-1]],  # negative y
+])
+def test_defect_negative_position(defect_positions):
+    with pytest.raises(ValueError, match="Defect"):
+        validate_problem(**valid(defect_positions=defect_positions))
+
+def test_defect_outside_sheet():
+    with pytest.raises(ValueError, match="outside the sheet"):
+        validate_problem(**valid(defect_positions=[[26], [26]], defect_sizes=[[5], [5]]))
+
+
+# --- valid inputs pass ---
+def test_valid_problem_passes():
+    validate_problem(**VALID)
+
+def test_valid_no_defects_passes():
+    validate_problem(
+        item_sizes=[[5], [5]],
+        defect_sizes=[[], []],
+        defect_positions=[[], []],
+        sheet_size=(27, 27),
+    )

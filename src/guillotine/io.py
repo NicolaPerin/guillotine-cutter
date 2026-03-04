@@ -2,6 +2,36 @@
 
 import json
 
+def validate_problem(item_sizes, defect_sizes, defect_positions, sheet_size):
+    """Validate problem inputs, raising ValueError with a clear message on failure."""
+    W, H = sheet_size
+
+    # Sheet
+    if W <= 0 or H <= 0:
+        raise ValueError(f"Sheet dimensions must be positive, got {W}x{H}")
+
+    # Items
+    if not item_sizes[0]:
+        raise ValueError("At least one item must be provided")
+    for i, (w, h) in enumerate(zip(item_sizes[0], item_sizes[1])):
+        if w <= 0 or h <= 0:
+            raise ValueError(f"Item {i} dimensions must be positive, got {w}x{h}")
+        if w > W or h > H:
+            raise ValueError(f"Item {i} ({w}x{h}) is larger than the sheet ({W}x{H})")
+
+    # Defects
+    for i, (x, y, w, h) in enumerate(zip(
+        defect_positions[0], defect_positions[1],
+        defect_sizes[0], defect_sizes[1]
+    )):
+        if w <= 0 or h <= 0:
+            raise ValueError(f"Defect {i} dimensions must be positive, got {w}x{h}")
+        if x < 0 or y < 0:
+            raise ValueError(f"Defect {i} position must be non-negative, got ({x},{y})")
+        if x + w > W or y + h > H:
+            raise ValueError(f"Defect {i} at ({x},{y}) size {w}x{h} extends outside the sheet")
+        
+
 def save_problem_json(filepath, item_sizes, defect_sizes, defect_positions, sheet_size):
     """Save problem definition to JSON file."""
     problem = {
@@ -58,12 +88,15 @@ def load_problem_json(filepath):
     
     sheet_size = tuple(problem["sheet_size"])
     
+    validate_problem(item_sizes, defect_sizes, defect_positions, sheet_size)
+    
     return {
         "item_sizes": item_sizes,
         "defect_sizes": defect_sizes,
         "defect_positions": defect_positions,
         "sheet_size": sheet_size
     }
+
 
 def save_solution_json(filepath, value, sequence, sheet_size, defect_area):
     """Save solution to JSON file with all metrics."""
@@ -92,6 +125,7 @@ def save_solution_json(filepath, value, sequence, sheet_size, defect_area):
     with open(filepath, 'w') as f:
         json.dump(solution, f, indent=2)
 
+
 def _serialize_sequence(seq):
     """Convert nested tuple sequence to JSON-serializable dict."""
     if isinstance(seq, str):
@@ -108,6 +142,7 @@ def _serialize_sequence(seq):
         "left": _serialize_sequence(left),
         "right": _serialize_sequence(right)
     }
+
 
 def load_items_csv(filepath):
     """Load items from CSV file.
@@ -129,6 +164,7 @@ def load_items_csv(filepath):
             heights.append(int(row['height']))
     
     return [widths, heights]
+
 
 def load_defects_csv(filepath):
     """Load defects from CSV file.
