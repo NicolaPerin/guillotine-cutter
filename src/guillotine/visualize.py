@@ -101,11 +101,30 @@ class CuttingVisualizer:
         self.yticks.clear()
         self._draw_cuts(ax, sequence, W0, H0, colors, (0, 0))
         
-        # Add tick marks at cut positions
-        all_xticks = [0] + sorted(set(self.xticks)) + [W0]
-        all_yticks = [0] + sorted(set(self.yticks)) + [H0]
+        # Add tick marks at cut positions with alternating offsets to avoid overlap
+        all_xticks = sorted(set([0] + self.xticks + [W0]))
+        all_yticks = sorted(set([0] + self.yticks + [H0]))
+
         ax.set_xticks(all_xticks)
         ax.set_yticks(all_yticks)
+
+        # Alternate x tick labels: far ones get a longer tick to bridge the gap
+        for i, tick in enumerate(ax.xaxis.get_major_ticks()):
+            if i % 2 == 1:
+                tick.set_pad(15)
+                tick.tick1line.set_markersize(12)
+            else:
+                tick.set_pad(2)
+                tick.tick1line.set_markersize(4)
+
+        # Alternate y tick labels: far ones get a longer tick to bridge the gap
+        for i, tick in enumerate(ax.yaxis.get_major_ticks()):
+            if i % 2 == 1:
+                tick.set_pad(15)
+                tick.tick1line.set_markersize(12)
+            else:
+                tick.set_pad(2)
+                tick.tick1line.set_markersize(4)
         
         # Save
         plt.savefig(output_file, dpi=150, bbox_inches='tight')
