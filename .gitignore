@@ -14,3 +14,10 @@ htmlcov/
 
 # CLI output
 output/
+
+# C extension build artifacts
+build/
+src/**/*.so
+src/**/*.o
+*.so
+*.o
