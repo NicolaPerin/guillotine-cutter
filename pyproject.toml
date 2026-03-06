@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=45", "wheel", "Cython>=3.0.0", "numpy>=1.20.0"]
+requires = ["setuptools>=45", "wheel", "numpy>=1.20.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -30,6 +30,9 @@ dev = [
     "build>=0.7.0",
     "ipython>=8.0.0",
 ]
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.pytest.ini_options]
 minversion = "7.0"

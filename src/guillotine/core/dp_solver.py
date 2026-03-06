@@ -109,6 +109,25 @@ class GuillotineDP:
     
     def _fill_Fd(self):
         """Bottom-up iterative DP for defected rectangles."""
+        try:
+            from guillotine.core import _solver
+            _solver.fill_Fd(
+                self.W0, self.H0,
+                self.geom.prefix,
+                self.F_values,
+                self.Fd_values, self.Fd_type, self.Fd_param,
+                self.patterns.np_x_arr, self.patterns.np_x_len,
+                self.patterns.np_y_arr, self.patterns.np_y_len,
+                self.geom.defects_arr,
+                int(self.patterns.np_x_arr.shape[1]),
+                int(self.patterns.np_y_arr.shape[1]),
+                self.geom.n_def
+            )
+            return
+        except ImportError:
+            pass
+
+        # Python fallback
         W0, H0 = self.W0, self.H0
         F_values = self.F_values
         Fd_values = self.Fd_values
