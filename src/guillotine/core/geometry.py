@@ -2,6 +2,8 @@
 
 import numpy as np
 
+from guillotine.core.constants import NR_DEFECT_FIELDS
+
 class SheetGeometry:
     """Handles defects with O(1) purity queries using 2D prefix sums."""
     
@@ -22,6 +24,13 @@ class SheetGeometry:
         
         self.n_def = n_def
         self._build_prefix()
+
+        # Flat numpy array for C interop: shape (n_def, 6)
+        # columns: dx, dy, dw, dh, dx_end, dy_end
+        if self.n_def > 0:
+            self.defects_arr = np.array(self.defects, dtype=np.int32)
+        else:
+            self.defects_arr = np.zeros((0, NR_DEFECT_FIELDS), dtype=np.int32)
     
     def _build_prefix(self):
         """Build 2D prefix sum array for fast defect overlap queries."""

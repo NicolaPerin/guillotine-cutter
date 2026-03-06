@@ -10,3 +10,5 @@ DECISION_PURE = 5
 
 # Sentinel value for uncomputed DP states
 NOT_COMPUTED = -1
+
+NR_DEFECT_FIELDS = 6  # dx, dy, dw, dh, dx_end, dy_end

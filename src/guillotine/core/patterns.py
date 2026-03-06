@@ -1,5 +1,8 @@
 """Pattern generation for guillotine cuts."""
 
+import numpy as np
+
+
 def compute_normal_patterns(item_sizes, max_L):
     """Compute reachable cut positions using DP."""
     sizes = sorted(set(int(s) for s in item_sizes if s > 0))
@@ -17,6 +20,27 @@ def compute_normal_patterns(item_sizes, max_L):
     
     return patterns
 
+def compute_normal_patterns_arrays(patterns_dict, max_L):
+    """Convert normal patterns dict to numpy arrays for C interop.
+    
+    Returns:
+        arr: 2D int32 array, shape (max_L+1, max_L), arr[w, i] = i-th cut for width w
+        lengths: 1D int32 array, shape (max_L+1,), lengths[w] = number of cuts for width w
+    """
+    lengths = np.zeros(max_L + 1, dtype=np.int32)
+    for L in range(max_L + 1):
+        lengths[L] = len(patterns_dict.get(L, []))
+    
+    max_cuts = int(lengths.max()) if lengths.max() > 0 else 0
+    arr = np.zeros((max_L + 1, max_cuts), dtype=np.int32)
+    
+    for L in range(max_L + 1):
+        cuts = patterns_dict.get(L, [])
+        for i, z in enumerate(cuts):
+            arr[L, i] = z
+    
+    return arr, lengths
+
 class CutPatternGenerator:
     """Generates candidate cut positions."""
     
@@ -28,6 +52,9 @@ class CutPatternGenerator:
         # Precompute normal patterns for both directions
         self.np_x = compute_normal_patterns(item_sizes[0], self.W0)
         self.np_y = compute_normal_patterns(item_sizes[1], self.H0)
+
+        self.np_x_arr, self.np_x_len = compute_normal_patterns_arrays(self.np_x, self.W0)
+        self.np_y_arr, self.np_y_len = compute_normal_patterns_arrays(self.np_y, self.H0)
         
         # Pre-allocate scratch buffers (reused to avoid allocations)
         self._x_mask = [False] * (self.W0 + 1)
