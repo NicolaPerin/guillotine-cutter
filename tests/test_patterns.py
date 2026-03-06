@@ -1,6 +1,5 @@
 """Tests for pattern generation module."""
 
-import pytest
 from guillotine.core.patterns import compute_normal_patterns
 
 

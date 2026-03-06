@@ -1,6 +1,5 @@
 """Tests for DP solver module."""
 
-import pytest
 from guillotine.core.dp_solver import GuillotineDP
 from guillotine.core.geometry import SheetGeometry
 from guillotine.core.patterns import CutPatternGenerator
@@ -100,31 +99,6 @@ def test_dp_solver_multiple_defects():
     
     # Should get something but less than perfect (400)
     assert 0 < value < 400
-
-def test_dp_solver_zero_dimensions():
-    """Test with zero or negative dimensions via F and F_d methods."""
-    item_sizes = [[3], [3]]
-    geom = SheetGeometry((10, 10), [[], []], [[], []])
-    patterns = CutPatternGenerator(item_sizes, geom)
-    
-    dp = GuillotineDP(item_sizes, geom, patterns)
-    
-    # Test F (pure rectangle) with zero dimensions
-    assert dp.F(0, 5) == 0
-    assert dp.F(5, 0) == 0
-    assert dp.F(0, 0) == 0
-    
-    # Test F with negative dimensions
-    assert dp.F(-5, 5) == 0
-    assert dp.F(5, -5) == 0
-    
-    # Test F_d (defected rectangle) with zero dimensions
-    assert dp.F_d(0, 0, 0, 5) == 0
-    assert dp.F_d(0, 0, 5, 0) == 0
-    
-    # Test F_d with negative dimensions
-    assert dp.F_d(0, 0, -5, 5) == 0
-    assert dp.F_d(0, 0, 5, -5) == 0
 
 def test_dp_solver_paper_benchmark():
     """Test benchmark case from original paper.

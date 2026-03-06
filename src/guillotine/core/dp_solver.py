@@ -27,12 +27,13 @@ class GuillotineDP:
         
         # Pure rectangles: numpy arrays for O(1) access (no hashing)
         self.F_values = np.zeros((self.W0 + 1, self.H0 + 1), dtype=np.int32)
-        self.F_type = np.zeros((self.W0 + 1, self.H0 + 1), dtype=np.int8)
-        self.F_param = np.zeros((self.W0 + 1, self.H0 + 1), dtype=np.int32)
-        
-        # Defected rectangles: dict (4D space too sparse for array)
-        # Stores (value, decision_type, decision_param)
-        self.cache = {}
+        self.F_type   = np.zeros((self.W0 + 1, self.H0 + 1), dtype=np.int32)
+        self.F_param  = np.zeros((self.W0 + 1, self.H0 + 1), dtype=np.int32)
+
+        # Defected rectangles: dense 4D arrays (will replace cache)
+        self.Fd_values = np.zeros((self.W0 + 1, self.H0 + 1, self.W0 + 1, self.H0 + 1), dtype=np.int32)
+        self.Fd_type   = np.zeros((self.W0 + 1, self.H0 + 1, self.W0 + 1, self.H0 + 1), dtype=np.int32)
+        self.Fd_param  = np.zeros((self.W0 + 1, self.H0 + 1, self.W0 + 1, self.H0 + 1), dtype=np.int32)
         
         self._precompute_g()
         self._precompute_F()
@@ -106,129 +107,65 @@ class GuillotineDP:
                 F_type[w, h] = best_type
                 F_param[w, h] = best_param
     
-    def F(self, w, h):
-        """Get pure rectangle value."""
-        if w <= 0 or h <= 0:
-            return 0
-        return int(self.F_values[w, h])
-    
-    def F_d(self, x, y, w, h):
-        """DP for defected rectangles with inlined child lookups."""
-        if w <= 0 or h <= 0:
-            return 0
-        
-        key = (x, y, w, h)
-        cached = self.cache.get(key)
-        if cached is not None:
-            return cached[0]
-        
-        # Check purity
-        if self.geom.is_pure(x, y, w, h):
-            val = int(self.F_values[w, h])
-            self.cache[key] = (val, DECISION_PURE, 0)
-            return val
-        
-        best_val = 0
-        best_type = DECISION_DEFECT
-        best_param = 0
-        
-        # Local refs for speed
-        cache = self.cache
-        is_pure = self.geom.is_pure
+    def _fill_Fd(self):
+        """Bottom-up iterative DP for defected rectangles."""
+        W0, H0 = self.W0, self.H0
         F_values = self.F_values
-        
-        X_cuts, Y_cuts = self.patterns.cuts_defected(x, y, w, h)
-        
-        # Vertical cuts with inlined lookups
-        for z in X_cuts:
-            # Left child
-            lw, lh = z, h
-            if lw > 0:
-                lkey = (x, y, lw, lh)
-                lc = cache.get(lkey)
-                if lc is not None:
-                    lv = lc[0]
-                elif is_pure(x, y, lw, lh):
-                    lv = int(F_values[lw, lh])
-                    cache[lkey] = (lv, DECISION_PURE, 0)
-                else:
-                    lv = self.F_d(x, y, lw, lh)
-            else:
-                lv = 0
-            
-            # Right child
-            rx, rw, rh = x + z, w - z, h
-            if rw > 0:
-                rkey = (rx, y, rw, rh)
-                rc = cache.get(rkey)
-                if rc is not None:
-                    rv = rc[0]
-                elif is_pure(rx, y, rw, rh):
-                    rv = int(F_values[rw, rh])
-                    cache[rkey] = (rv, DECISION_PURE, 0)
-                else:
-                    rv = self.F_d(rx, y, rw, rh)
-            else:
-                rv = 0
-            
-            total = lv + rv
-            if total > best_val:
-                best_val = total
-                best_type = DECISION_CUT_X
-                best_param = z
-        
-        # Horizontal cuts with inlined lookups
-        for z in Y_cuts:
-            # Bottom child
-            bw, bh = w, z
-            if bh > 0:
-                bkey = (x, y, bw, bh)
-                bc = cache.get(bkey)
-                if bc is not None:
-                    bv = bc[0]
-                elif is_pure(x, y, bw, bh):
-                    bv = int(F_values[bw, bh])
-                    cache[bkey] = (bv, DECISION_PURE, 0)
-                else:
-                    bv = self.F_d(x, y, bw, bh)
-            else:
-                bv = 0
-            
-            # Top child
-            ty, tw, th = y + z, w, h - z
-            if th > 0:
-                tkey = (x, ty, tw, th)
-                tc = cache.get(tkey)
-                if tc is not None:
-                    tv = tc[0]
-                elif is_pure(x, ty, tw, th):
-                    tv = int(F_values[tw, th])
-                    cache[tkey] = (tv, DECISION_PURE, 0)
-                else:
-                    tv = self.F_d(x, ty, tw, th)
-            else:
-                tv = 0
-            
-            total = bv + tv
-            if total > best_val:
-                best_val = total
-                best_type = DECISION_CUT_Y
-                best_param = z
-        
-        cache[key] = (best_val, best_type, best_param)
-        return best_val
+        Fd_values = self.Fd_values
+        Fd_type   = self.Fd_type
+        Fd_param  = self.Fd_param
+        prefix   = self.geom.prefix
+
+        for w in range(1, W0 + 1):
+            for h in range(1, H0 + 1):
+                for x in range(0, W0 - w + 1):
+                    for y in range(0, H0 - h + 1):
+
+                        if prefix[x+w, y+h] - prefix[x, y+h] - prefix[x+w, y] + prefix[x, y] == 0:
+                            Fd_values[x, y, w, h] = F_values[w, h]
+                            Fd_type[x, y, w, h]   = DECISION_PURE
+                            Fd_param[x, y, w, h]  = 0
+                            continue
+
+                        best_val  = 0
+                        best_type = DECISION_DEFECT
+                        best_param = 0
+
+                        X_cuts, Y_cuts = self.patterns.cuts_defected(x, y, w, h)
+
+                        for z in X_cuts:
+                            lv = Fd_values[x,     y, z,     h]
+                            rv = Fd_values[x + z, y, w - z, h]
+                            total = int(lv) + int(rv)
+                            if total > best_val:
+                                best_val   = total
+                                best_type  = DECISION_CUT_X
+                                best_param = z
+
+                        for z in Y_cuts:
+                            bv = Fd_values[x, y,     w, z    ]
+                            tv = Fd_values[x, y + z, w, h - z]
+                            total = int(bv) + int(tv)
+                            if total > best_val:
+                                best_val   = total
+                                best_type  = DECISION_CUT_Y
+                                best_param = z
+
+                        Fd_values[x, y, w, h] = best_val
+                        Fd_type[x, y, w, h]   = best_type
+                        Fd_param[x, y, w, h]  = best_param
     
     def solve(self):
         """Solve and return (value, sequence)."""
-        # Fast path: entirely pure sheet
         if self.geom.is_pure(0, 0, self.W0, self.H0):
             val = int(self.F_values[self.W0, self.H0])
             seq = self._reconstruct_F(self.W0, self.H0)
             return val, seq
-        
-        val = self.F_d(0, 0, self.W0, self.H0)
+
+        self._fill_Fd()
+        val = int(self.Fd_values[0, 0, self.W0, self.H0])
         seq = self._reconstruct_Fd(0, 0, self.W0, self.H0)
-        return int(val), seq
+        return val, seq
     
     def _reconstruct_F(self, w, h):
         """Reconstruct sequence for pure rectangle."""
@@ -253,12 +190,8 @@ class GuillotineDP:
         if w <= 0 or h <= 0:
             return 'empty'
         
-        c = self.cache.get((x, y, w, h))
-        if c is None:
-            return 'empty'
-        
-        _, t, p = c
-        p = int(p)
+        t = int(self.Fd_type[x, y, w, h])
+        p = int(self.Fd_param[x, y, w, h])
         
         if t == DECISION_PURE:
             return self._reconstruct_F(w, h)

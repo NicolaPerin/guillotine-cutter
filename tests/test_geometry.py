@@ -1,6 +1,5 @@
 """Tests for SheetGeometry module."""
 
-import pytest
 from guillotine.core.geometry import SheetGeometry
 
 

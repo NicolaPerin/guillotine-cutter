@@ -1,9 +1,5 @@
 """Tests for visualization module."""
 
-import pytest  # noqa: F401
-import os
-
-
 def test_visualizer_init():
     """Test CuttingVisualizer initialization."""
     from guillotine.visualize import CuttingVisualizer
