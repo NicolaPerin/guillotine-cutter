@@ -31,9 +31,9 @@ class GuillotineDP:
         self.F_param  = np.zeros((self.W0 + 1, self.H0 + 1), dtype=np.int32)
 
         # Defected rectangles: dense 4D arrays (will replace cache)
-        self.Fd_values = np.zeros((self.W0 + 1, self.H0 + 1, self.W0 + 1, self.H0 + 1), dtype=np.int32)
-        self.Fd_type   = np.zeros((self.W0 + 1, self.H0 + 1, self.W0 + 1, self.H0 + 1), dtype=np.int32)
-        self.Fd_param  = np.zeros((self.W0 + 1, self.H0 + 1, self.W0 + 1, self.H0 + 1), dtype=np.int32)
+        self.Fd_values = np.zeros((self.W0+1, self.H0+1, self.W0+1, self.H0+1), dtype=np.int32)
+        self.Fd_type   = np.zeros((self.W0+1, self.H0+1, self.W0+1, self.H0+1), dtype=np.int32)
+        self.Fd_param  = np.zeros((self.W0+1, self.H0+1, self.W0+1, self.H0+1), dtype=np.int32)
         
         self._precompute_g()
         self._precompute_F()
@@ -141,7 +141,7 @@ class GuillotineDP:
                     for y in range(0, H0 - h + 1):
 
                         if prefix[x+w, y+h] - prefix[x, y+h] - prefix[x+w, y] + prefix[x, y] == 0:
-                            Fd_values[x, y, w, h] = F_values[w, h]
+                            Fd_values[w, h, x, y] = F_values[w, h]
                             Fd_type[x, y, w, h]   = DECISION_PURE
                             Fd_param[x, y, w, h]  = 0
                             continue
@@ -170,7 +170,7 @@ class GuillotineDP:
                                 best_type  = DECISION_CUT_Y
                                 best_param = z
 
-                        Fd_values[x, y, w, h] = best_val
+                        Fd_values[w, h, x, y] = best_val
                         Fd_type[x, y, w, h]   = best_type
                         Fd_param[x, y, w, h]  = best_param
     
@@ -182,7 +182,7 @@ class GuillotineDP:
             return val, seq
 
         self._fill_Fd()
-        val = int(self.Fd_values[0, 0, self.W0, self.H0])
+        val = int(self.Fd_values[self.W0, self.H0, 0, 0])
         seq = self._reconstruct_Fd(0, 0, self.W0, self.H0)
         return val, seq
     
@@ -209,8 +209,8 @@ class GuillotineDP:
         if w <= 0 or h <= 0:
             return 'empty'
         
-        t = int(self.Fd_type[x, y, w, h])
-        p = int(self.Fd_param[x, y, w, h])
+        t = int(self.Fd_type[w, h, x, y])
+        p = int(self.Fd_param[w, h, x, y])
         
         if t == DECISION_PURE:
             return self._reconstruct_F(w, h)

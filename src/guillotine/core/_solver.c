@@ -16,8 +16,8 @@
  * Fd_values, Fd_type, Fd_param are 4D: shape (W0+1, H0+1, W0+1, H0+1)
  */
 
- #define IDX_2D(arr, stride1, i, j) ((arr)[(i) * (stride1) + (j)])
- #define IDX_4D(arr, stride1, stride2, stride3, x, y, w, h) ((arr)[(x) * (stride1) + (y) * (stride2) + (w) * (stride3) + (h)])
+#define IDX_2D(arr, stride1, i, j) ((arr)[(i) * (stride1) + (j)])
+#define IDX_4D(arr, stride0, stride1, stride2, w, h, x, y) ((arr)[(w) * (stride0) + (h) * (stride1) + (x) * (stride2) + (y)])
 
 /*
  * Core fill function.
@@ -38,10 +38,11 @@ static void fill_Fd_core(
     int stride_p  = H0 + 1;   /* prefix[x, y]    = prefix[x*stride_p + y]  */
     int stride_F  = H0 + 1;   /* F_values[w, h]  = F_values[w*stride_F + h] */
 
-    /* strides for 4D arrays (x, y, w, h) */
-    int stride3 = H0 + 1;
-    int stride2 = (W0 + 1) * stride3;
-    int stride1 = (H0 + 1) * stride2;
+    /* strides for 4D arrays (w, h, x, y) */
+    /* y varies fastest, stride=1 */
+    int stride2 = H0 + 1;                   /* x stride */
+    int stride1 = (W0 + 1) * stride2;       /* h stride = (W0+1)*(H0+1) */
+    int stride0 = (H0 + 1) * stride1;       /* w stride = (H0+1)*(W0+1)*(H0+1) */
 
     for (int w = 1; w <= W0; w++) {
         for (int h = 1; h <= H0; h++) {
@@ -56,9 +57,9 @@ static void fill_Fd_core(
                       + IDX_2D(prefix, stride_p, x,   y  );
 
                     if (defect_count == 0) {
-                        IDX_4D(Fd_values, stride1, stride2, stride3, x, y, w, h) = IDX_2D(F_values, stride_F, w, h);
-                        IDX_4D(Fd_type,   stride1, stride2, stride3, x, y, w, h) = DECISION_PURE;
-                        IDX_4D(Fd_param,  stride1, stride2, stride3, x, y, w, h) = 0;
+                        IDX_4D(Fd_values, stride0, stride1, stride2, w, h, x, y) = IDX_2D(F_values, stride_F, w, h);
+                        IDX_4D(Fd_type,   stride0, stride1, stride2, w, h, x, y) = DECISION_PURE;
+                        IDX_4D(Fd_param,  stride0, stride1, stride2, w, h, x, y) = 0;
                         continue;
                     }
 
@@ -72,8 +73,8 @@ static void fill_Fd_core(
                     int nx = np_x_len[w];
                     for (int i = 0; i < nx; i++) {
                         int z = np_x_arr[w * max_cuts_x + i];
-                        int32_t lv = IDX_4D(Fd_values, stride1, stride2, stride3, x,   y, z,   h);
-                        int32_t rv = IDX_4D(Fd_values, stride1, stride2, stride3, x+z, y, w-z, h);
+                        int32_t lv = IDX_4D(Fd_values, stride0, stride1, stride2, z,   h, x,   y);
+                        int32_t rv = IDX_4D(Fd_values, stride0, stride1, stride2, w-z, h, x+z, y);
                         int32_t total = lv + rv;
                         if (total > best_val) {
                             best_val   = total;
@@ -97,8 +98,8 @@ static void fill_Fd_core(
                         for (int ci = 0; ci < 2; ci++) {
                             int z = cuts[ci];
                             if (z <= 0 || z >= w) continue;
-                            int32_t lv = IDX_4D(Fd_values, stride1, stride2, stride3, x,   y, z,   h);
-                            int32_t rv = IDX_4D(Fd_values, stride1, stride2, stride3, x+z, y, w-z, h);
+                            int32_t lv = IDX_4D(Fd_values, stride0, stride1, stride2, z,   h, x,   y);
+                            int32_t rv = IDX_4D(Fd_values, stride0, stride1, stride2, w-z, h, x+z, y);
                             int32_t total = lv + rv;
                             if (total > best_val) {
                                 best_val   = total;
@@ -114,8 +115,8 @@ static void fill_Fd_core(
                     int ny = np_y_len[h];
                     for (int i = 0; i < ny; i++) {
                         int z = np_y_arr[h * max_cuts_y + i];
-                        int32_t bv = IDX_4D(Fd_values, stride1, stride2, stride3, x, y,   w, z  );
-                        int32_t tv = IDX_4D(Fd_values, stride1, stride2, stride3, x, y+z, w, h-z);
+                        int32_t bv = IDX_4D(Fd_values, stride0, stride1, stride2, w, z,   x, y  );
+                        int32_t tv = IDX_4D(Fd_values, stride0, stride1, stride2, w, h-z, x, y+z);
                         int32_t total = bv + tv;
                         if (total > best_val) {
                             best_val   = total;
@@ -138,8 +139,8 @@ static void fill_Fd_core(
                         for (int ci = 0; ci < 2; ci++) {
                             int z = cuts[ci];
                             if (z <= 0 || z >= h) continue;
-                            int32_t bv = IDX_4D(Fd_values, stride1, stride2, stride3, x, y,   w, z  );
-                            int32_t tv = IDX_4D(Fd_values, stride1, stride2, stride3, x, y+z, w, h-z);
+                            int32_t bv = IDX_4D(Fd_values, stride0, stride1, stride2, w, z,   x, y  );
+                            int32_t tv = IDX_4D(Fd_values, stride0, stride1, stride2, w, h-z, x, y+z);
                             int32_t total = bv + tv;
                             if (total > best_val) {
                                 best_val   = total;
@@ -149,9 +150,9 @@ static void fill_Fd_core(
                         }
                     }
 
-                    IDX_4D(Fd_values, stride1, stride2, stride3, x, y, w, h) = best_val;
-                    IDX_4D(Fd_type,   stride1, stride2, stride3, x, y, w, h) = best_type;
-                    IDX_4D(Fd_param,  stride1, stride2, stride3, x, y, w, h) = best_param;
+                    IDX_4D(Fd_values, stride0, stride1, stride2, w, h, x, y) = best_val;
+                    IDX_4D(Fd_type,   stride0, stride1, stride2, w, h, x, y) = best_type;
+                    IDX_4D(Fd_param,  stride0, stride1, stride2, w, h, x, y) = best_param;
                 } /* y */
             } /* x */
         } /* h */
