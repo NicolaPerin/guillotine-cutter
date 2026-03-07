@@ -10,43 +10,50 @@ from guillotine.core.constants import (
     DECISION_PURE,
 )
 
+# Bit layout for Fd_packed (uint16):
+#   bits 15-13 : decision type (DECISION_* constants, values 0-5)
+#   bits 12-0  : cut parameter (cut position z, max 8191)
+_PACK_SHIFT = 13
+_PACK_MASK  = 0x1FFF
+
 
 class GuillotineDP:
-    """Optimized DP solver v7."""
-    
+    """Optimized DP solver."""
+
     def __init__(self, item_sizes, geometry, patterns):
         self.geom = geometry
         self.patterns = patterns
         self.W0 = geometry.W0
         self.H0 = geometry.H0
-        
-        self.item_w = np.array(item_sizes[0], dtype=np.int32)
-        self.item_h = np.array(item_sizes[1], dtype=np.int32)
+
+        self.item_w    = np.array(item_sizes[0], dtype=np.int32)
+        self.item_h    = np.array(item_sizes[1], dtype=np.int32)
         self.item_area = self.item_w * self.item_h
-        self.n_items = len(self.item_w)
-        
-        # Pure rectangles: numpy arrays for O(1) access (no hashing)
+        self.n_items   = len(self.item_w)
+
+        # Pure rectangles: 2D tables, shape (W0+1, H0+1)
         self.F_values = np.zeros((self.W0 + 1, self.H0 + 1), dtype=np.int32)
-        self.F_type   = np.zeros((self.W0 + 1, self.H0 + 1), dtype=np.int32)
+        self.F_type   = np.zeros((self.W0 + 1, self.H0 + 1), dtype=np.int8)
         self.F_param  = np.zeros((self.W0 + 1, self.H0 + 1), dtype=np.int32)
 
-        # Defected rectangles: dense 4D arrays (will replace cache)
-        self.Fd_values = np.zeros((self.W0+1, self.H0+1, self.W0+1, self.H0+1), dtype=np.int32)
-        self.Fd_type   = np.zeros((self.W0+1, self.H0+1, self.W0+1, self.H0+1), dtype=np.int32)
-        self.Fd_param  = np.zeros((self.W0+1, self.H0+1, self.W0+1, self.H0+1), dtype=np.int32)
-        
+        # Defected rectangles: 4D tables, shape (W0+1, H0+1, W0+1, H0+1), layout [w, h, x, y]
+        # Fd_values: uint32 — values are always non-negative, doubles max representable value vs int32
+        # Fd_packed: uint16 — bits 15-13 = type, bits 12-0 = param, saves one full array vs separate arrays
+        self.Fd_values = np.zeros((self.W0+1, self.H0+1, self.W0+1, self.H0+1), dtype=np.uint32)
+        self.Fd_packed = np.zeros((self.W0+1, self.H0+1, self.W0+1, self.H0+1), dtype=np.uint16)
+
         self._precompute_g()
         self._precompute_F()
-    
+
     def _precompute_g(self):
-        """Precompute best tiling for each size."""
+        """Precompute best single-item tiling value and item index for each rectangle size."""
         W0, H0 = self.W0, self.H0
         item_w, item_h, item_area = self.item_w, self.item_h, self.item_area
         n_items = self.n_items
-        
-        g_values = np.zeros((W0 + 1, H0 + 1), dtype=np.int32)
+
+        g_values  = np.zeros((W0 + 1, H0 + 1), dtype=np.int32)
         g_indices = np.full((W0 + 1, H0 + 1), -1, dtype=np.int32)
-        
+
         for w in range(1, W0 + 1):
             for h in range(1, H0 + 1):
                 best_val = 0
@@ -59,63 +66,67 @@ class GuillotineDP:
                         if val > best_val:
                             best_val = val
                             best_idx = i
-                g_values[w, h] = best_val
+                g_values[w, h]  = best_val
                 g_indices[w, h] = best_idx
-        
-        self.g_values = g_values
+
+        self.g_values  = g_values
         self.g_indices = g_indices
-    
+
     def _precompute_F(self):
-        """Bottom-up DP for pure rectangles."""
-        W0, H0 = self.W0, self.H0
-        patterns = self.patterns
-        g_values = self.g_values
+        """Bottom-up DP for pure rectangles (no defects)."""
+        W0, H0    = self.W0, self.H0
+        patterns  = self.patterns
+        g_values  = self.g_values
         g_indices = self.g_indices
-        F_values = self.F_values
-        F_type = self.F_type
-        F_param = self.F_param
-        
+        F_values  = self.F_values
+        F_type    = self.F_type
+        F_param   = self.F_param
+
         for w in range(1, W0 + 1):
             for h in range(1, H0 + 1):
-                best_val = int(g_values[w, h])
-                best_type = DECISION_FILL if g_indices[w, h] >= 0 else DECISION_EMPTY
+                best_val   = int(g_values[w, h])
+                best_type  = DECISION_FILL if g_indices[w, h] >= 0 else DECISION_EMPTY
                 best_param = int(g_indices[w, h]) if g_indices[w, h] >= 0 else 0
-                
-                # Vertical cuts (use symmetry)
+
+                # Vertical cuts — exploit symmetry, only try z <= w/2
                 half_w = w >> 1
                 for z in patterns.cuts_pure_x(w):
                     if z > half_w:
                         break
                     total = F_values[z, h] + F_values[w - z, h]
                     if total > best_val:
-                        best_val = total
-                        best_type = DECISION_CUT_X
+                        best_val   = total
+                        best_type  = DECISION_CUT_X
                         best_param = z
-                
-                # Horizontal cuts (use symmetry)
+
+                # Horizontal cuts — exploit symmetry, only try z <= h/2
                 half_h = h >> 1
                 for z in patterns.cuts_pure_y(h):
                     if z > half_h:
                         break
                     total = F_values[w, z] + F_values[w, h - z]
                     if total > best_val:
-                        best_val = total
-                        best_type = DECISION_CUT_Y
+                        best_val   = total
+                        best_type  = DECISION_CUT_Y
                         best_param = z
-                
+
                 F_values[w, h] = best_val
-                F_type[w, h] = best_type
-                F_param[w, h] = best_param
-    
+                F_type[w, h]   = best_type
+                F_param[w, h]  = best_param
+
     def _fill_Fd(self):
-        """Bottom-up iterative DP for defected rectangles."""
+        """Bottom-up iterative DP for defected rectangles.
+
+        Tries the C extension first; falls back to pure Python if unavailable.
+        Arrays use layout [w, h, x, y] for cache locality in the hot loop.
+        """
         try:
             from guillotine.core import _solver
             _solver.fill_Fd(
                 self.W0, self.H0,
                 self.geom.prefix,
                 self.F_values,
-                self.Fd_values, self.Fd_type, self.Fd_param,
+                self.Fd_values, self.Fd_packed,         # uint32 values + uint16 packed type/param
                 self.patterns.np_x_arr, self.patterns.np_x_len,
                 self.patterns.np_y_arr, self.patterns.np_y_len,
                 self.geom.defects_arr,
@@ -127,55 +138,54 @@ class GuillotineDP:
         except ImportError:
             pass
 
-        # Python fallback
-        W0, H0 = self.W0, self.H0
-        F_values = self.F_values
+        # Python fallback — same logic as C extension, used when .so is not compiled
+        W0, H0    = self.W0, self.H0
+        F_values  = self.F_values
         Fd_values = self.Fd_values
-        Fd_type   = self.Fd_type
-        Fd_param  = self.Fd_param
-        prefix   = self.geom.prefix
+        Fd_packed = self.Fd_packed
+        prefix    = self.geom.prefix
 
         for w in range(1, W0 + 1):
             for h in range(1, H0 + 1):
                 for x in range(0, W0 - w + 1):
                     for y in range(0, H0 - h + 1):
 
+                        # Purity check via prefix sum — O(1)
                         if prefix[x+w, y+h] - prefix[x, y+h] - prefix[x+w, y] + prefix[x, y] == 0:
                             Fd_values[w, h, x, y] = F_values[w, h]
-                            Fd_type[x, y, w, h]   = DECISION_PURE
-                            Fd_param[x, y, w, h]  = 0
+                            Fd_packed[w, h, x, y] = DECISION_PURE << _PACK_SHIFT
                             continue
 
-                        best_val  = 0
-                        best_type = DECISION_DEFECT
+                        best_val   = 0
+                        best_type  = DECISION_DEFECT
                         best_param = 0
 
                         X_cuts, Y_cuts = self.patterns.cuts_defected(x, y, w, h)
 
                         for z in X_cuts:
-                            lv = Fd_values[x,     y, z,     h]
-                            rv = Fd_values[x + z, y, w - z, h]
-                            total = int(lv) + int(rv)
+                            lv    = int(Fd_values[z,     h, x,   y])
+                            rv    = int(Fd_values[w - z, h, x+z, y])
+                            total = lv + rv
                             if total > best_val:
                                 best_val   = total
                                 best_type  = DECISION_CUT_X
                                 best_param = z
 
                         for z in Y_cuts:
-                            bv = Fd_values[x, y,     w, z    ]
-                            tv = Fd_values[x, y + z, w, h - z]
-                            total = int(bv) + int(tv)
+                            bv    = int(Fd_values[w, z,     x, y  ])
+                            tv    = int(Fd_values[w, h - z, x, y+z])
+                            total = bv + tv
                             if total > best_val:
                                 best_val   = total
                                 best_type  = DECISION_CUT_Y
                                 best_param = z
 
                         Fd_values[w, h, x, y] = best_val
-                        Fd_type[x, y, w, h]   = best_type
-                        Fd_param[x, y, w, h]  = best_param
-    
+                        Fd_packed[w, h, x, y] = (best_type << _PACK_SHIFT) | (best_param & _PACK_MASK)
+
     def solve(self):
-        """Solve and return (value, sequence)."""
+        """Solve and return (optimal_value, cut_sequence)."""
+        # Fast path: pure sheet — skip Fd entirely
         if self.geom.is_pure(0, 0, self.W0, self.H0):
             val = int(self.F_values[self.W0, self.H0])
             seq = self._reconstruct_F(self.W0, self.H0)
@@ -185,15 +195,15 @@ class GuillotineDP:
         val = int(self.Fd_values[self.W0, self.H0, 0, 0])
         seq = self._reconstruct_Fd(0, 0, self.W0, self.H0)
         return val, seq
-    
+
     def _reconstruct_F(self, w, h):
-        """Reconstruct sequence for pure rectangle."""
+        """Reconstruct cut sequence for a pure rectangle."""
         if w <= 0 or h <= 0:
             return 'empty'
-        
-        t = self.F_type[w, h]
+
+        t = int(self.F_type[w, h])
         p = int(self.F_param[w, h])
-        
+
         if t == DECISION_EMPTY:
             return 'empty'
         if t == DECISION_FILL:
@@ -203,15 +213,17 @@ class GuillotineDP:
         if t == DECISION_CUT_Y:
             return ('Y', p, self._reconstruct_F(w, p), self._reconstruct_F(w, h - p))
         return 'empty'
-    
+
     def _reconstruct_Fd(self, x, y, w, h):
-        """Reconstruct sequence for defected rectangle."""
+        """Reconstruct cut sequence for a defected rectangle."""
         if w <= 0 or h <= 0:
             return 'empty'
-        
-        t = int(self.Fd_type[w, h, x, y])
-        p = int(self.Fd_param[w, h, x, y])
-        
+
+        # Unpack type and param from single uint16 field
+        packed = int(self.Fd_packed[w, h, x, y])
+        t = (packed >> _PACK_SHIFT) & 0x7
+        p = packed & _PACK_MASK
+
         if t == DECISION_PURE:
             return self._reconstruct_F(w, h)
         if t == DECISION_EMPTY:
