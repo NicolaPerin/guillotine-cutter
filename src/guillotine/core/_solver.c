@@ -50,8 +50,7 @@ static void fill_Fd_core(
             int ny = np_y_len[h];
 
             /* parallelize over all (x, y) positions for this (w, h) rectangle */
-            //int iterations = (W0 - w + 1) * (H0 - h + 1); /* heuristic: only parallelize if enough iterations to amortize overhead */
-            #pragma omp parallel for schedule(dynamic, 16) collapse(2)
+            #pragma omp parallel for schedule(dynamic, 16) collapse(2) /* chunk size means 16 iterations per thread */
             for (int x = 0; x <= W0 - w; x++) {
                 for (int y = 0; y <= H0 - h; y++) {
 

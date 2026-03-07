@@ -3,7 +3,8 @@
 [![codecov](https://codecov.io/gh/NicolaPerin/guillotine-cutter/branch/develop/graph/badge.svg)](https://codecov.io/gh/NicolaPerin/guillotine-cutter)
 
 ## Features
-- Fast dynamic programming algorithm
+- Exact dynamic programming algorithm for 2D guillotine cutting with defects
+- C extension with OpenMP parallelization for fast solving
 - Handles defects and irregular regions
 - JSON and CSV input support
 - Command-line interface with `benchmark` and `solve` subcommands
@@ -15,8 +16,13 @@
 ```bash
 git clone https://github.com/NicolaPerin/guillotine-cutter.git
 cd guillotine-cutter
-pip install -e .
+pip install -e .[dev]
+python setup.py build_ext --inplace
 ```
+
+The second command installs the package and its dependencies. The third compiles
+the C extension (`_solver.so`) which is required for solving — without it the
+solver falls back to a slower pure Python implementation.
 
 ## Quick Start
 
@@ -114,11 +120,53 @@ The solver generates:
 - **PNG visualization** (optional) showing the cutting pattern
 - **Profile data** (optional) for performance analysis
 
+## Performance
+
+The hot loop of the DP is implemented as a C extension (`_solver.c`) compiled
+with `-O2 -funroll-loops`. The `(x,y)` positions at each fixed `(w,h)` slice
+are parallelized with OpenMP using `schedule(dynamic, 16)`. The number of
+threads defaults to the system default (typically all available cores) and can
+be controlled via the `OMP_NUM_THREADS` environment variable:
+
+```bash
+OMP_NUM_THREADS=6 guillotine solve problem.json
+```
+
+Benchmark results on a Ryzen 5 9600X (6 cores, OMP_NUM_THREADS=6):
+
+| Problem  | Sheet   | Items | Defects | Time   | Memory |
+|----------|---------|-------|---------|--------|--------|
+| benchmark | 27×27  | 4     | 1       | 0.003s | 34 MB  |
+| medium   | 40×40   | 4     | 6       | 0.013s | 58 MB  |
+| large    | 60×60   | 4     | 10      | 0.058s | 182 MB |
+| xlarge   | 80×80   | 6     | 15      | 0.238s | 514 MB |
+| xxlarge  | 100×100 | 10    | 20      | 0.703s | 1.2 GB |
+
+### Memory requirements
+
+The algorithm stores three 4D arrays of shape `(W+1, H+1, W+1, H+1)` in
+`int32`, giving a memory footprint of approximately `3 × (N+1)^4 × 4` bytes for
+an `N×N` sheet. This grows as the fourth power of sheet size:
+
+| Sheet   | Memory |
+|---------|--------|
+| 60×60   | 182 MB |
+| 80×80   | 514 MB |
+| 100×100 | 1.2 GB |
+| 120×120 | 2.6 GB |
+| 150×150 | 7.9 GB |
+
+The full table is allocated upfront regardless of how many states are actually needed. 
+In the current implementation, memory is therefore the binding constraint for large problems.
+
 ## Development
 
 ```bash
 # Install in development mode
 pip install -e .[dev]
+
+# Compile C extension
+python setup.py build_ext --inplace
 
 # Run all tests
 pytest tests/ -v
@@ -132,23 +180,44 @@ pytest tests/ --cov=guillotine --cov-report=term
 ```
 guillotine-cutter/
 ├── src/guillotine/
-│   ├── core/             # Core algorithm
-│   │   ├── geometry.py   # Defect handling with O(1) queries
-│   │   ├── patterns.py   # Cut position generation
-│   │   └── dp_solver.py  # Dynamic programming solver
-│   ├── io.py             # JSON/CSV input/output
-│   ├── visualize.py      # Matplotlib visualization
-│   └── __main__.py       # CLI entry point
-└── tests/                # Comprehensive test suite
+│   ├── core/
+│   │   ├── geometry.py      # SheetGeometry: defect prefix sums, O(1) purity queries
+│   │   ├── patterns.py      # CutPatternGenerator: normal pattern cut positions
+│   │   ├── dp_solver.py     # GuillotineDP: DP solver, reconstruction
+│   │   ├── _solver.c        # C extension: fill_Fd hot loop with OpenMP
+│   │   └── constants.py     # DECISION_* constants shared by Python and C
+│   ├── io.py                # JSON/CSV I/O, input validation
+│   ├── visualize.py         # Matplotlib visualization
+│   └── __main__.py          # CLI entry point
+├── setup.py                 # C extension build configuration
+├── tests/                   # Test suite
+└── examples/                # Example problem JSON files
 ```
+
+### Algorithm overview
+
+The solver implements exact guillotine DP in two phases:
+
+**Phase 1 — pure rectangles (`_precompute_F`):** For each rectangle size
+`(w,h)`, compute the best tiling assuming no defects. This is a standard 2D
+knapsack DP and only requires a `(W+1)×(H+1)` table.
+
+**Phase 2 — defected rectangles (`_fill_Fd`):** For each rectangle size `(w,h)`
+and position `(x,y)`, compute the best tiling accounting for defects. Pure
+rectangles reuse Phase 1 results directly. Defected rectangles try all normal
+pattern cuts and all defect boundary cuts, taking the best. This requires a
+`(W+1)×(H+1)×(W+1)×(H+1)` table indexed as `[w,h,x,y]` for cache locality.
+
+The hot loop of Phase 2 is implemented in `_solver.c` and parallelized with
+OpenMP across `(x,y)` positions at each fixed `(w,h)`.
 
 ## Citation
 
 This project is inspired by the guillotine cutting approach for 2D cutting stock problems with defects described in:
 
-H. Zhang, S. Yao, Q. Liu, J. Leng, and L. Wei,  
-"Exact approaches for the unconstrained two-dimensional cutting problem with defects,"  
-*Computers & Operations Research*, vol. 160, 106407, 2023.  
+H. Zhang, S. Yao, Q. Liu, J. Leng, and L. Wei,
+"Exact approaches for the unconstrained two-dimensional cutting problem with defects,"
+*Computers & Operations Research*, vol. 160, 106407, 2023.
 [https://doi.org/10.1016/j.cor.2023.106407](https://doi.org/10.1016/j.cor.2023.106407)
 
 ## License
