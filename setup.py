@@ -5,7 +5,8 @@ ext = Extension(
     name="guillotine.core._solver",
     sources=["src/guillotine/core/_solver.c"],
     include_dirs=[np.get_include()],
-    extra_compile_args=["-O2", "-funroll-loops", "-Wall"],
+    extra_compile_args=["-O2", "-funroll-loops", "-fopenmp", "-Wall"],
+    extra_link_args=["-fopenmp"]
 )
 
 setup(ext_modules=[ext])

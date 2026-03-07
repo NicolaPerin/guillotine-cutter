@@ -45,11 +45,17 @@ static void fill_Fd_core(
     int stride0 = (H0 + 1) * stride1;       /* w stride = (H0+1)*(W0+1)*(H0+1) */
 
     for (int w = 1; w <= W0; w++) {
+        int nx = np_x_len[w];
         for (int h = 1; h <= H0; h++) {
+            int ny = np_y_len[h];
+
+            /* parallelize over all (x, y) positions for this (w, h) rectangle */
+            //int iterations = (W0 - w + 1) * (H0 - h + 1); /* heuristic: only parallelize if enough iterations to amortize overhead */
+            #pragma omp parallel for schedule(dynamic, 16) collapse(2)
             for (int x = 0; x <= W0 - w; x++) {
                 for (int y = 0; y <= H0 - h; y++) {
 
-                    /* purity check: inline prefix sum query */
+                    /* purity check: inline prefix sum query */ 
                     int32_t defect_count =
                         IDX_2D(prefix, stride_p, x+w, y+h)
                       - IDX_2D(prefix, stride_p, x,   y+h)
@@ -70,7 +76,6 @@ static void fill_Fd_core(
                     /* --- vertical cuts (X direction) --- */
 
                     /* normal pattern cuts */
-                    int nx = np_x_len[w];
                     for (int i = 0; i < nx; i++) {
                         int z = np_x_arr[w * max_cuts_x + i];
                         int32_t lv = IDX_4D(Fd_values, stride0, stride1, stride2, z,   h, x,   y);
@@ -112,7 +117,6 @@ static void fill_Fd_core(
                     /* --- horizontal cuts (Y direction) --- */
 
                     /* normal pattern cuts */
-                    int ny = np_y_len[h];
                     for (int i = 0; i < ny; i++) {
                         int z = np_y_arr[h * max_cuts_y + i];
                         int32_t bv = IDX_4D(Fd_values, stride0, stride1, stride2, w, z,   x, y  );
