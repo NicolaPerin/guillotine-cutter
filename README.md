@@ -134,13 +134,17 @@ OMP_NUM_THREADS=6 guillotine solve problem.json
 
 Benchmark results on a Ryzen 5 9600X (6 cores, OMP_NUM_THREADS=6):
 
-| Problem  | Sheet   | Items | Defects | Time   | Memory |
-|----------|---------|-------|---------|--------|--------|
-| benchmark | 27×27  | 4     | 1       | 0.003s | 34 MB  |
-| medium   | 40×40   | 4     | 6       | 0.013s | 58 MB  |
-| large    | 60×60   | 4     | 10      | 0.058s | 182 MB |
-| xlarge   | 80×80   | 6     | 15      | 0.238s | 514 MB |
-| xxlarge  | 100×100 | 10    | 20      | 0.703s | 1.2 GB |
+| Sheet   | Items | Defects | Time   | Memory |
+|---------|-------|---------|--------|--------|
+| 27×27  | 4     | 1       | 0.003s | 34 MB  |
+| 40×40   | 4     | 6       | 0.013s | 58 MB  |
+| 60×60   | 4     | 10      | 0.058s | 182 MB |
+| 80×80   | 6     | 15      | 0.238s | 514 MB |
+| 100×100 | 10    | 20      | 0.703s | 1.2 GB |
+
+Example output for the 40×40 problem (4 item types, 6 defects):
+
+<img src="images/solution_40x40.png" width="600" alt="40×40 solution">
 
 ### Memory requirements
 
