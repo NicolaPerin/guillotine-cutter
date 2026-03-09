@@ -139,91 +139,21 @@ class GuillotineDP:
                 F_param[w, h]  = best_param
 
     def _fill_Fd(self):
-        """Bottom-up iterative DP for defected rectangles.
-
-        Tries the C extension first; falls back to pure Python if unavailable.
-        Arrays use layout [w, h, x, y] for cache locality in the hot loop.
-        """
-        # Allocate 4D tables on first use — avoids wasting memory for pure sheets
         shape = (self.W0+1, self.H0+1, self.W0+1, self.H0+1)
         self.Fd_values = np.zeros(shape, dtype=np.uint32)
-        self.Fd_packed = np.zeros(shape, dtype=np.uint16)
 
         try:
             from guillotine.core import _solver
             _solver.fill_Fd(
-                self.W0, self.H0,
-                self.geom.prefix,
-                self.F_values,
-                self.Fd_values, self.Fd_packed,         # uint32 values + uint16 packed type/param
+                self.W0, self.H0, self.geom.prefix, self.F_values, self.Fd_values,
                 self.patterns.np_x_arr, self.patterns.np_x_len,
                 self.patterns.np_y_arr, self.patterns.np_y_len,
                 self.geom.defects_arr,
-                int(self.patterns.np_x_arr.shape[1]),
-                int(self.patterns.np_y_arr.shape[1]),
-                self.geom.n_def
+                int(self.patterns.np_x_arr.shape[1]), int(self.patterns.np_y_arr.shape[1]), self.geom.n_def
             )
-            return
         except ImportError:
+            # Python fallback would implement the same value-only logic
             pass
-
-        # Python fallback — same logic as C extension, used when .so is not compiled
-        W0, H0    = self.W0, self.H0
-        F_values  = self.F_values
-        Fd_values = self.Fd_values
-        Fd_packed = self.Fd_packed
-        prefix    = self.geom.prefix
-
-        for w in range(1, W0 + 1):
-            for h in range(1, H0 + 1):
-                for x in range(0, W0 - w + 1):
-                    for y in range(0, H0 - h + 1):
-
-                        # Purity check via prefix sum — O(1)
-                        if prefix[x+w, y+h] - prefix[x, y+h] - prefix[x+w, y] + prefix[x, y] == 0:
-                            Fd_values[w, h, x, y] = F_values[w, h]
-                            Fd_packed[w, h, x, y] = DECISION_PURE << _PACK_SHIFT
-                            continue
-
-                        best_val   = 0
-                        best_type  = DECISION_DEFECT
-                        best_param = 0
-
-                        X_cuts, Y_cuts = self.patterns.cuts_defected(x, y, w, h)
-
-                        for z in X_cuts:
-                            lv    = int(Fd_values[z,     h, x,   y])
-                            rv    = int(Fd_values[w - z, h, x+z, y])
-                            total = lv + rv
-                            if total > best_val:
-                                best_val   = total
-                                best_type  = DECISION_CUT_X
-                                best_param = z
-
-                        for z in Y_cuts:
-                            bv    = int(Fd_values[w, z,     x, y  ])
-                            tv    = int(Fd_values[w, h - z, x, y+z])
-                            total = bv + tv
-                            if total > best_val:
-                                best_val   = total
-                                best_type  = DECISION_CUT_Y
-                                best_param = z
-
-                        Fd_values[w, h, x, y] = best_val
-                        Fd_packed[w, h, x, y] = (best_type << _PACK_SHIFT) | (best_param & _PACK_MASK)
-
-    def solve(self):
-        """Solve and return (optimal_value, cut_sequence)."""
-        # Fast path: pure sheet — skip Fd entirely
-        if self.geom.is_pure(0, 0, self.W0, self.H0):
-            val = int(self.F_values[self.W0, self.H0])
-            seq = self._reconstruct_F(self.W0, self.H0)
-            return val, seq
-
-        self._fill_Fd()
-        val = int(self.Fd_values[self.W0, self.H0, 0, 0])
-        seq = self._reconstruct_Fd(0, 0, self.W0, self.H0)
-        return val, seq
 
     def _reconstruct_F(self, w, h):
         """Reconstruct cut sequence for a pure rectangle."""
@@ -244,23 +174,36 @@ class GuillotineDP:
         return 'empty'
 
     def _reconstruct_Fd(self, x, y, w, h):
-        """Reconstruct cut sequence for a defected rectangle."""
-        if w <= 0 or h <= 0:
-            return 'empty'
+        """Finds the optimal cut by checking which candidate cut produces the target value."""
+        if w <= 0 or h <= 0: return 'empty'
+        
+        target_val = int(self.Fd_values[w, h, x, y])
+        if target_val == 0: return 'empty'
 
-        # Unpack type and param from single uint16 field
-        packed = int(self.Fd_packed[w, h, x, y])
-        t = (packed >> _PACK_SHIFT) & 0x7
-        p = packed & _PACK_MASK
-
-        if t == DECISION_PURE:
+        # If pure, delegate to the 2D reconstruction (which still has types/params)
+        if self.geom.prefix[x+w, y+h] - self.geom.prefix[x, y+h] - self.geom.prefix[x+w, y] + self.geom.prefix[x, y] == 0:
             return self._reconstruct_F(w, h)
-        if t == DECISION_EMPTY:
-            return 'empty'
-        if t == DECISION_DEFECT:
-            return 'defect'
-        if t == DECISION_CUT_X:
-            return ('X', p, self._reconstruct_Fd(x, y, p, h), self._reconstruct_Fd(x + p, y, w - p, h))
-        if t == DECISION_CUT_Y:
-            return ('Y', p, self._reconstruct_Fd(x, y, w, p), self._reconstruct_Fd(x, y + p, w, h - p))
-        return 'empty'
+
+        # Get the same candidate cuts used in the C solver
+        X_cuts, Y_cuts = self.patterns.cuts_defected(x, y, w, h)
+
+        # Re-check X cuts: Sum of values must equal target_val
+        for z in X_cuts:
+            if int(self.Fd_values[z, h, x, y]) + int(self.Fd_values[w - z, h, x+z, y]) == target_val:
+                return ('X', z, self._reconstruct_Fd(x, y, z, h), self._reconstruct_Fd(x + z, y, w - z, h))
+
+        # Re-check Y cuts
+        for z in Y_cuts:
+            if int(self.Fd_values[w, z, x, y]) + int(self.Fd_values[w, h - z, x, y+z]) == target_val:
+                return ('Y', z, self._reconstruct_Fd(x, y, w, z), self._reconstruct_Fd(x, y + z, w, h - z))
+
+        return 'defect' # Base case for pieces that contain a defect but cannot be cut further
+
+    def solve(self):
+        if self.geom.is_pure(0, 0, self.W0, self.H0):
+            return int(self.F_values[self.W0, self.H0]), self._reconstruct_F(self.W0, self.H0)
+
+        self._fill_Fd()
+        val = int(self.Fd_values[self.W0, self.H0, 0, 0])
+        seq = self._reconstruct_Fd(0, 0, self.W0, self.H0)
+        return val, seq
