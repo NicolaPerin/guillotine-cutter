@@ -36,11 +36,10 @@ class GuillotineDP:
         self.F_type   = np.zeros((self.W0 + 1, self.H0 + 1), dtype=np.int8)
         self.F_param  = np.zeros((self.W0 + 1, self.H0 + 1), dtype=np.int32)
 
-        # Defected rectangles: 4D tables, shape (W0+1, H0+1, W0+1, H0+1), layout [w, h, x, y]
-        # Fd_values: uint32 — values are always non-negative, doubles max representable value vs int32
-        # Fd_packed: uint16 — bits 15-13 = type, bits 12-0 = param, saves one full array vs separate arrays
-        self.Fd_values = np.zeros((self.W0+1, self.H0+1, self.W0+1, self.H0+1), dtype=np.uint32)
-        self.Fd_packed = np.zeros((self.W0+1, self.H0+1, self.W0+1, self.H0+1), dtype=np.uint16)
+        # Defected rectangles: allocated lazily in _fill_Fd() to avoid
+        # wasting (W0+1)^4 × 6 bytes when the sheet is pure
+        self.Fd_values = None
+        self.Fd_packed = None
 
         self._precompute_g()
         self._precompute_F()
@@ -48,26 +47,35 @@ class GuillotineDP:
     def _precompute_g(self):
         """Precompute best single-item tiling value and item index for each rectangle size."""
         W0, H0 = self.W0, self.H0
-        item_w, item_h, item_area = self.item_w, self.item_h, self.item_area
-        n_items = self.n_items
 
         g_values  = np.zeros((W0 + 1, H0 + 1), dtype=np.int32)
         g_indices = np.full((W0 + 1, H0 + 1), -1, dtype=np.int32)
 
-        for w in range(1, W0 + 1):
-            for h in range(1, H0 + 1):
-                best_val = 0
-                best_idx = -1
-                for i in range(n_items):
-                    nx = w // item_w[i]
-                    ny = h // item_h[i]
-                    if nx > 0 and ny > 0:
-                        val = item_area[i] * nx * ny
-                        if val > best_val:
-                            best_val = val
-                            best_idx = i
-                g_values[w, h]  = best_val
-                g_indices[w, h] = best_idx
+        try:
+            from guillotine.core import _solver
+            _solver.fill_g(
+                W0, H0,
+                g_values, g_indices,
+                self.item_w, self.item_h, self.item_area,
+                self.n_items
+            )
+        except ImportError:
+            item_w, item_h, item_area = self.item_w, self.item_h, self.item_area
+            n_items = self.n_items
+            for w in range(1, W0 + 1):
+                for h in range(1, H0 + 1):
+                    best_val = 0
+                    best_idx = -1
+                    for i in range(n_items):
+                        nx = w // item_w[i]
+                        ny = h // item_h[i]
+                        if nx > 0 and ny > 0:
+                            val = item_area[i] * nx * ny
+                            if val > best_val:
+                                best_val = val
+                                best_idx = i
+                    g_values[w, h]  = best_val
+                    g_indices[w, h] = best_idx
 
         self.g_values  = g_values
         self.g_indices = g_indices
@@ -75,12 +83,28 @@ class GuillotineDP:
     def _precompute_F(self):
         """Bottom-up DP for pure rectangles (no defects)."""
         W0, H0    = self.W0, self.H0
-        patterns  = self.patterns
-        g_values  = self.g_values
-        g_indices = self.g_indices
         F_values  = self.F_values
         F_type    = self.F_type
         F_param   = self.F_param
+
+        try:
+            from guillotine.core import _solver
+            _solver.fill_F(
+                W0, H0,
+                self.g_values, self.g_indices,
+                F_values, F_type, F_param,
+                self.patterns.np_x_arr, self.patterns.np_x_len,
+                self.patterns.np_y_arr, self.patterns.np_y_len,
+                int(self.patterns.np_x_arr.shape[1]),
+                int(self.patterns.np_y_arr.shape[1]),
+            )
+            return
+        except ImportError:
+            pass
+
+        patterns  = self.patterns
+        g_values  = self.g_values
+        g_indices = self.g_indices
 
         for w in range(1, W0 + 1):
             for h in range(1, H0 + 1):
@@ -120,6 +144,11 @@ class GuillotineDP:
         Tries the C extension first; falls back to pure Python if unavailable.
         Arrays use layout [w, h, x, y] for cache locality in the hot loop.
         """
+        # Allocate 4D tables on first use — avoids wasting memory for pure sheets
+        shape = (self.W0+1, self.H0+1, self.W0+1, self.H0+1)
+        self.Fd_values = np.zeros(shape, dtype=np.uint32)
+        self.Fd_packed = np.zeros(shape, dtype=np.uint16)
+
         try:
             from guillotine.core import _solver
             _solver.fill_Fd(
