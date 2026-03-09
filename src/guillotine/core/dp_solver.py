@@ -6,15 +6,7 @@ from guillotine.core.constants import (
     DECISION_FILL,
     DECISION_CUT_X,
     DECISION_CUT_Y,
-    DECISION_DEFECT,
-    DECISION_PURE,
 )
-
-# Bit layout for Fd_packed (uint16):
-#   bits 15-13 : decision type (DECISION_* constants, values 0-5)
-#   bits 12-0  : cut parameter (cut position z, max 8191)
-_PACK_SHIFT = 13
-_PACK_MASK  = 0x1FFF
 
 
 class GuillotineDP:
@@ -175,10 +167,12 @@ class GuillotineDP:
 
     def _reconstruct_Fd(self, x, y, w, h):
         """Finds the optimal cut by checking which candidate cut produces the target value."""
-        if w <= 0 or h <= 0: return 'empty'
+        if w <= 0 or h <= 0: 
+            return 'empty'
         
         target_val = int(self.Fd_values[w, h, x, y])
-        if target_val == 0: return 'empty'
+        if target_val == 0: 
+            return 'empty'
 
         # If pure, delegate to the 2D reconstruction (which still has types/params)
         if self.geom.prefix[x+w, y+h] - self.geom.prefix[x, y+h] - self.geom.prefix[x+w, y] + self.geom.prefix[x, y] == 0:
