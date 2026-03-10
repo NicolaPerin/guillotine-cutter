@@ -171,7 +171,11 @@ class GuillotineDP:
             return 'empty'
         
         target_val = int(self.Fd_values[w, h, x, y])
-        if target_val == 0: 
+
+        # If value is zero, distinguish between empty area and full defect
+        if target_val == 0:
+            if self.geom.prefix[x+w, y+h] - self.geom.prefix[x, y+h] - self.geom.prefix[x+w, y] + self.geom.prefix[x, y] > 0:
+                return 'defect'
             return 'empty'
 
         # If pure, delegate to the 2D reconstruction (which still has types/params)
