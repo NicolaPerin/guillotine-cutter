@@ -1,6 +1,6 @@
 #define PY_SSIZE_T_CLEAN // Ensure Py_ssize_t is defined before including Python.h
 #include <Python.h> // Python C API header
-#include <stdint.h> // for fixed-width integer types like uint32_t, uint16_t
+#include <stdint.h> // for fixed-width integer types like int32_t, int16_t
 
 /* Decision type constants - must match constants.py */
 #define DECISION_EMPTY  0
@@ -10,24 +10,33 @@
 #define DECISION_DEFECT 4
 #define DECISION_PURE   5
 
+/* Defect array access macros (each defect entry has NR_DEFECT_FIELDS fields) */
+#define NR_DEFECT_FIELDS 6
+#define DEF_X(d)     defects[(d)*NR_DEFECT_FIELDS + 0]  /* x start of defect bounding box */
+#define DEF_Y(d)     defects[(d)*NR_DEFECT_FIELDS + 1]  /* y start of defect bounding box */
+#define DEF_W(d)     defects[(d)*NR_DEFECT_FIELDS + 2]  /* width  of defect bounding box */
+#define DEF_H(d)     defects[(d)*NR_DEFECT_FIELDS + 3]  /* height of defect bounding box */
+#define DEF_X_END(d) defects[(d)*NR_DEFECT_FIELDS + 4]  /* x end  of defect bounding box (exclusive) */
+#define DEF_Y_END(d) defects[(d)*NR_DEFECT_FIELDS + 5]  /* y end  of defect bounding box (exclusive) */
+
 /*
- * Bit layout for Fd_packed (uint16_t):
+ * Bit layout for Fd_packed (int16_t):
  *   bits 15-13 : decision type (DECISION_* constants, values 0-5, fits in 3 bits)
  *   bits 12-0  : cut parameter (cut position z, max value 8191, covers any practical sheet)
  *
- * Pack:   packed = ((uint16_t)type << 13) | ((uint16_t)param & 0x1FFF)
+ * Pack:   packed = ((int16_t)type << 13) | ((int16_t)param & 0x1FFF)
  * Unpack: type   = (packed >> 13) & 0x7
  *         param  = packed & 0x1FFF
  */
-#define PACK_FD(type, param)   (((uint16_t)(type) << 13) | ((uint16_t)(param) & 0x1FFF))
+#define PACK_FD(type, param)   (((int16_t)(type) << 13) | ((int16_t)(param) & 0x1FFF))
 #define UNPACK_TYPE(packed)    (((packed) >> 13) & 0x7)
 #define UNPACK_PARAM(packed)   ((packed) & 0x1FFF)
 
 /*
  * Array index macros.
  * prefix, F_values are 2D: shape (W0+1, H0+1)
- * Fd_values is 4D uint32_t: shape (W0+1, H0+1, W0+1, H0+1)
- * Fd_packed is 4D uint16_t: shape (W0+1, H0+1, W0+1, H0+1), same layout
+ * Fd_values is 4D int32_t: shape (W0+1, H0+1, W0+1, H0+1)
+ * Fd_packed is 4D int16_t: shape (W0+1, H0+1, W0+1, H0+1), same layout
  */
 #define IDX_2D(arr, stride1, i, j) ((arr)[(i) * (stride1) + (j)])
 #define IDX_4D(arr, stride0, stride1, stride2, w, h, x, y) ((arr)[(w) * (stride0) + (h) * (stride1) + (x) * (stride2) + (y)])
@@ -96,20 +105,26 @@ static void fill_F_core(
     int stride = H0 + 1;
 
     for (int w = 1; w <= W0; w++) {
-        int nx = np_x_len[w];
-        for (int h = 1; h <= H0; h++) {
-            int ny = np_y_len[h];
+        int nx         = np_x_len[w];
+        int w_off      = w * stride;
+        int x_cut_base = w * max_cuts_x;
+        int half_w     = w >> 1;
 
-            int32_t best_val   = g_values[w * stride + h];
-            int     best_type  = (g_indices[w * stride + h] >= 0) ? DECISION_FILL : DECISION_EMPTY;
-            int32_t best_param = (g_indices[w * stride + h] >= 0) ? g_indices[w * stride + h] : 0;
+        for (int h = 1; h <= H0; h++) {
+            int ny         = np_y_len[h];
+            int y_cut_base = h * max_cuts_y;
+            int half_h     = h >> 1;
+
+            int32_t g_idx    = g_indices[w_off + h];
+            int32_t best_val = g_values [w_off + h];
+            int     best_type  = (g_idx >= 0) ? DECISION_FILL : DECISION_EMPTY;
+            int32_t best_param = (g_idx >= 0) ? g_idx : 0;
 
             /* Vertical cuts — symmetry: only z <= w/2 */
-            int half_w = w >> 1;
             for (int i = 0; i < nx; i++) {
-                int z = np_x_arr[w * max_cuts_x + i];
+                int z = np_x_arr[x_cut_base + i];
                 if (z > half_w) break;
-                int32_t total = F_values[z * stride + h] + F_values[(w - z) * stride + h];
+                int32_t total = F_values[z * stride + h] + F_values[w_off - z * stride + h];
                 if (total > best_val) {
                     best_val   = total;
                     best_type  = DECISION_CUT_X;
@@ -118,11 +133,10 @@ static void fill_F_core(
             }
 
             /* Horizontal cuts — symmetry: only z <= h/2 */
-            int half_h = h >> 1;
             for (int i = 0; i < ny; i++) {
-                int z = np_y_arr[h * max_cuts_y + i];
+                int z = np_y_arr[y_cut_base + i];
                 if (z > half_h) break;
-                int32_t total = F_values[w * stride + z] + F_values[w * stride + (h - z)];
+                int32_t total = F_values[w_off + z] + F_values[w_off + (h - z)];
                 if (total > best_val) {
                     best_val   = total;
                     best_type  = DECISION_CUT_Y;
@@ -130,9 +144,9 @@ static void fill_F_core(
                 }
             }
 
-            F_values[w * stride + h] = best_val;
-            F_type  [w * stride + h] = (int8_t)best_type;
-            F_param [w * stride + h] = best_param;
+            F_values[w_off + h] = best_val;
+            F_type  [w_off + h] = (int8_t)best_type;
+            F_param [w_off + h] = best_param;
         }
     }
 }
@@ -142,17 +156,17 @@ static void fill_F_core(
  * All arrays are passed as raw pointers — numpy guarantees contiguous memory.
  *
  * Memory layout vs previous version:
- *   Fd_values: int32 → uint32  (values are always non-negative, doubles max representable value)
- *   Fd_type + Fd_param → Fd_packed uint16  (saves 1 array, 33% less memory for Fd tables)
+ *   Fd_values: int32_t  (values are always non-negative)
+ *   Fd_type + Fd_param → Fd_packed int16_t  (saves 1 array, 33% less memory for Fd tables)
  */
 static void fill_Fd_core(
     int W0, int H0,
-    int32_t  *prefix,
-    int32_t  *F_values,
-    uint32_t *Fd_values,
-    int32_t  *np_x_arr, int32_t *np_x_len, int max_cuts_x,
-    int32_t  *np_y_arr, int32_t *np_y_len, int max_cuts_y,
-    int32_t  *defects, int n_def
+    int32_t *prefix,
+    int32_t *F_values,
+    int32_t *Fd_values,
+    int32_t *np_x_arr, int32_t *np_x_len, int max_cuts_x,
+    int32_t *np_y_arr, int32_t *np_y_len, int max_cuts_y,
+    int32_t *defects, int n_def
 ) {
     int stride_p = H0 + 1;
     int stride_F = H0 + 1;
@@ -176,54 +190,58 @@ static void fill_Fd_core(
                       + IDX_2D(prefix, stride_p, x,   y  );
 
                     if (defect_count == 0) {
-                        IDX_4D(Fd_values, stride0, stride1, stride2, w, h, x, y) = (uint32_t)IDX_2D(F_values, stride_F, w, h);
+                        IDX_4D(Fd_values, stride0, stride1, stride2, w, h, x, y) = IDX_2D(F_values, stride_F, w, h);
                         continue;
                     }
 
-                    uint32_t best_val = 0;
+                    int32_t best_val = 0;
 
-                    /* X cuts */
+                    /* X cuts — normal pattern positions */
                     for (int i = 0; i < nx; i++) {
                         int z = np_x_arr[w * max_cuts_x + i];
-                        uint32_t total = IDX_4D(Fd_values, stride0, stride1, stride2, z, h, x, y) + 
-                                         IDX_4D(Fd_values, stride0, stride1, stride2, w-z, h, x+z, y);
+                        int32_t total = IDX_4D(Fd_values, stride0, stride1, stride2, z, h, x, y) +
+                                        IDX_4D(Fd_values, stride0, stride1, stride2, w-z, h, x+z, y);
                         if (total > best_val) best_val = total;
                     }
 
+                    /* X cuts — defect-aligned positions */
                     for (int d = 0; d < n_def; d++) {
-                        int dx = defects[d*6 + 0], dx_end = defects[d*6 + 4];
-                        if (x >= dx_end || dx >= x+w) continue;
-                        int z1 = dx - x;
-                        int z2 = dx_end - x;
-                        int cuts[2] = { z1, z2 };
-                        for (int ci = 0; ci < 2; ci++) {
-                            int z = cuts[ci];
-                            if (z <= 0 || z >= w) continue;
-                            uint32_t total = IDX_4D(Fd_values, stride0, stride1, stride2, z, h, x, y) + 
-                                             IDX_4D(Fd_values, stride0, stride1, stride2, w-z, h, x+z, y);
+                        if (x >= DEF_X_END(d) || DEF_X(d) >= x + w) continue;
+                        int z1 = DEF_X(d) - x;
+                        int z2 = DEF_X_END(d) - x;
+                        if (z1 > 0 && z1 < h) {
+                            int32_t total = IDX_4D(Fd_values, stride0, stride1, stride2, w, z1, x, y) +
+                                            IDX_4D(Fd_values, stride0, stride1, stride2, w, h-z1, x, y+z1);
+                            if (total > best_val) best_val = total;
+                        }
+                        if (z2 > 0 && z2 < h) {
+                            int32_t total = IDX_4D(Fd_values, stride0, stride1, stride2, w, z2, x, y) +
+                                            IDX_4D(Fd_values, stride0, stride1, stride2, w, h-z2, x, y+z2);
                             if (total > best_val) best_val = total;
                         }
                     }
 
-                    /* Y cuts */
+                    /* Y cuts — normal pattern positions */
                     for (int i = 0; i < ny; i++) {
                         int z = np_y_arr[h * max_cuts_y + i];
-                        uint32_t total = IDX_4D(Fd_values, stride0, stride1, stride2, w, z, x, y) + 
-                                         IDX_4D(Fd_values, stride0, stride1, stride2, w, h-z, x, y+z);
+                        int32_t total = IDX_4D(Fd_values, stride0, stride1, stride2, w, z, x, y) +
+                                        IDX_4D(Fd_values, stride0, stride1, stride2, w, h-z, x, y+z);
                         if (total > best_val) best_val = total;
                     }
 
+                    /* Y cuts — defect-aligned positions */
                     for (int d = 0; d < n_def; d++) {
-                        int dy = defects[d*6 + 1], dy_end = defects[d*6 + 5];
-                        if (y >= dy_end || dy >= y+h) continue;
-                        int z1 = dy - y;
-                        int z2 = dy_end - y;
-                        int cuts[2] = { z1, z2 };
-                        for (int ci = 0; ci < 2; ci++) {
-                            int z = cuts[ci];
-                            if (z <= 0 || z >= h) continue;
-                            uint32_t total = IDX_4D(Fd_values, stride0, stride1, stride2, w, z, x, y) + 
-                                             IDX_4D(Fd_values, stride0, stride1, stride2, w, h-z, x, y+z);
+                        if (y >= DEF_Y_END(d) || DEF_Y(d) >= y + h) continue;
+                        int z1 = DEF_Y(d) - y;
+                        int z2 = DEF_Y_END(d) - y;
+                        if (z1 > 0 && z1 < h) {
+                            int32_t total = IDX_4D(Fd_values, stride0, stride1, stride2, w, z1, x, y) +
+                                            IDX_4D(Fd_values, stride0, stride1, stride2, w, h-z1, x, y+z1);
+                            if (total > best_val) best_val = total;
+                        }
+                        if (z2 > 0 && z2 < h) {
+                            int32_t total = IDX_4D(Fd_values, stride0, stride1, stride2, w, z2, x, y) +
+                                            IDX_4D(Fd_values, stride0, stride1, stride2, w, h-z2, x, y+z2);
                             if (total > best_val) best_val = total;
                         }
                     }
@@ -240,9 +258,8 @@ static PyObject* py_fill_Fd(PyObject *self, PyObject *args) {
     int W0, H0, max_cuts_x, max_cuts_y, n_def;
     PyObject *o_pre, *o_F, *o_Fd, *o_nx, *o_nlx, *o_ny, *o_nly, *o_def;
 
-    /* FIXED: Format string "iiOOOOOOOOiii" now correctly counts 8 objects and 5 ints */
-    if (!PyArg_ParseTuple(args, "iiOOOOOOOOiii", &W0, &H0, &o_pre, &o_F, &o_Fd, 
-                             &o_nx, &o_nlx, &o_ny, &o_nly, &o_def, 
+    if (!PyArg_ParseTuple(args, "iiOOOOOOOOiii", &W0, &H0, &o_pre, &o_F, &o_Fd,
+                             &o_nx, &o_nlx, &o_ny, &o_nly, &o_def,
                              &max_cuts_x, &max_cuts_y, &n_def)) return NULL;
 
     Py_buffer b_pre, b_F, b_Fd, b_nx, b_nlx, b_ny, b_nly, b_def;
@@ -255,8 +272,8 @@ static PyObject* py_fill_Fd(PyObject *self, PyObject *args) {
     PyObject_GetBuffer(o_nly, &b_nly, PyBUF_SIMPLE);
     PyObject_GetBuffer(o_def, &b_def, PyBUF_SIMPLE);
 
-    fill_Fd_core(W0, H0, (int32_t*)b_pre.buf, (int32_t*)b_F.buf, (uint32_t*)b_Fd.buf, 
-                 (int32_t*)b_nx.buf, (int32_t*)b_nlx.buf, max_cuts_x, 
+    fill_Fd_core(W0, H0, (int32_t*)b_pre.buf, (int32_t*)b_F.buf, (int32_t*)b_Fd.buf,
+                 (int32_t*)b_nx.buf, (int32_t*)b_nlx.buf, max_cuts_x,
                  (int32_t*)b_ny.buf, (int32_t*)b_nly.buf, max_cuts_y, (int32_t*)b_def.buf, n_def);
 
     PyBuffer_Release(&b_pre); PyBuffer_Release(&b_F); PyBuffer_Release(&b_Fd);
@@ -381,7 +398,6 @@ fail_F:
     return NULL;
 }
 
-/* method table */
 /* method table */
 static PyMethodDef SolverMethods[] = {
     {"fill_g",  py_fill_g,  METH_VARARGS, "Precompute best single-item tiling (g tables)."},
