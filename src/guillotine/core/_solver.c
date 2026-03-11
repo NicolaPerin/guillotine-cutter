@@ -61,15 +61,25 @@ static void fill_g_core(
     int stride = H0 + 1;
 
     for (int w = 1; w <= W0; w++) {
+
+        int w_stride = w * stride;
+        int nx_table[n_items];
+
+        for (int i = 0; i < n_items; i++)
+            nx_table[i] = w / item_w[i];
+
         for (int h = 1; h <= H0; h++) {
+
             int32_t best_val = 0;
             int32_t best_idx = -1;
 
             for (int i = 0; i < n_items; i++) {
-                int nx = w / item_w[i];
+                int nx = nx_table[i];
                 int ny = h / item_h[i];
+
                 if (nx > 0 && ny > 0) {
                     int32_t val = item_area[i] * nx * ny;
+
                     if (val > best_val) {
                         best_val = val;
                         best_idx = i;
@@ -77,8 +87,8 @@ static void fill_g_core(
                 }
             }
 
-            g_values [w * stride + h] = best_val;
-            g_indices[w * stride + h] = best_idx;
+            g_values [w_stride + h] = best_val;
+            g_indices[w_stride + h] = best_idx;
         }
     }
 }
@@ -106,7 +116,7 @@ static void fill_F_core(
 
     for (int w = 1; w <= W0; w++) {
         int nx         = np_x_len[w];
-        int w_off      = w * stride;
+        int w_stride   = w * stride;
         int x_cut_base = w * max_cuts_x;
         int half_w     = w >> 1;
 
@@ -115,8 +125,8 @@ static void fill_F_core(
             int y_cut_base = h * max_cuts_y;
             int half_h     = h >> 1;
 
-            int32_t g_idx    = g_indices[w_off + h];
-            int32_t best_val = g_values [w_off + h];
+            int32_t g_idx    = g_indices[w_stride + h];
+            int32_t best_val = g_values [w_stride + h];
             int     best_type  = (g_idx >= 0) ? DECISION_FILL : DECISION_EMPTY;
             int32_t best_param = (g_idx >= 0) ? g_idx : 0;
 
@@ -124,7 +134,7 @@ static void fill_F_core(
             for (int i = 0; i < nx; i++) {
                 int z = np_x_arr[x_cut_base + i];
                 if (z > half_w) break;
-                int32_t total = F_values[z * stride + h] + F_values[w_off - z * stride + h];
+                int32_t total = F_values[z * stride + h] + F_values[w_stride - z * stride + h];
                 if (total > best_val) {
                     best_val   = total;
                     best_type  = DECISION_CUT_X;
@@ -136,7 +146,7 @@ static void fill_F_core(
             for (int i = 0; i < ny; i++) {
                 int z = np_y_arr[y_cut_base + i];
                 if (z > half_h) break;
-                int32_t total = F_values[w_off + z] + F_values[w_off + (h - z)];
+                int32_t total = F_values[w_stride + z] + F_values[w_stride + (h - z)];
                 if (total > best_val) {
                     best_val   = total;
                     best_type  = DECISION_CUT_Y;
@@ -144,9 +154,9 @@ static void fill_F_core(
                 }
             }
 
-            F_values[w_off + h] = best_val;
-            F_type  [w_off + h] = (int8_t)best_type;
-            F_param [w_off + h] = best_param;
+            F_values[w_stride + h] = best_val;
+            F_type  [w_stride + h] = (int8_t)best_type;
+            F_param [w_stride + h] = best_param;
         }
     }
 }
@@ -176,11 +186,15 @@ static void fill_Fd_core(
 
     for (int w = 1; w <= W0; w++) {
         int nx = np_x_len[w];
+        int w_max_cuts_x = w * max_cuts_x;
+
         for (int h = 1; h <= H0; h++) {
             int ny = np_y_len[h];
+            int h_max_cuts_y = h * max_cuts_y;
 
             #pragma omp parallel for schedule(dynamic, 16) collapse(2)
             for (int x = 0; x <= W0 - w; x++) {
+
                 for (int y = 0; y <= H0 - h; y++) {
 
                     int32_t defect_count =
@@ -198,7 +212,7 @@ static void fill_Fd_core(
 
                     /* X cuts — normal pattern positions */
                     for (int i = 0; i < nx; i++) {
-                        int z = np_x_arr[w * max_cuts_x + i];
+                        int z = np_x_arr[w_max_cuts_x + i];
                         int32_t total = IDX_4D(Fd_values, stride0, stride1, stride2, z, h, x, y) +
                                         IDX_4D(Fd_values, stride0, stride1, stride2, w-z, h, x+z, y);
                         if (total > best_val) best_val = total;
@@ -223,7 +237,7 @@ static void fill_Fd_core(
 
                     /* Y cuts — normal pattern positions */
                     for (int i = 0; i < ny; i++) {
-                        int z = np_y_arr[h * max_cuts_y + i];
+                        int z = np_y_arr[h_max_cuts_y + i];
                         int32_t total = IDX_4D(Fd_values, stride0, stride1, stride2, w, z, x, y) +
                                         IDX_4D(Fd_values, stride0, stride1, stride2, w, h-z, x, y+z);
                         if (total > best_val) best_val = total;
