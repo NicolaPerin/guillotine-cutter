@@ -39,8 +39,7 @@
  * Fd_packed is 4D int16_t: shape (W0+1, H0+1, W0+1, H0+1), same layout
  */
 #define IDX_2D(arr, stride1, i, j) ((arr)[(i) * (stride1) + (j)])
-#define IDX_4D(arr, stride0, stride1, stride2, w, h, x, y) ((arr)[(w) * (stride0) + (h) * (stride1) + (x) * (stride2) + (y)])
-
+#define IDX_4D(arr, stride0, stride1, stride2, w, h, x, y) ((arr)[(int64_t)(w) * (stride0) + (int64_t)(h) * (stride1) + (int64_t)(x) * (stride2) + (y)])
 /*
  * Precompute g: best single-item tiling value and item index for each rectangle size.
  * g_values[w,h] = best area achievable by tiling w×h with copies of one item type
@@ -180,9 +179,9 @@ static void fill_Fd_core(
 ) {
     int stride_p = H0 + 1;
     int stride_F = H0 + 1;
-    int stride2 = H0 + 1;
-    int stride1 = (W0 + 1) * stride2;
-    int stride0 = (H0 + 1) * stride1;
+    int64_t stride2 = H0 + 1;
+    int64_t stride1 = (int64_t)(W0 + 1) * stride2;
+    int64_t stride0 = (int64_t)(H0 + 1) * stride1;
 
     for (int w = 1; w <= W0; w++) {
         int nx = np_x_len[w];
@@ -223,14 +222,14 @@ static void fill_Fd_core(
                         if (x >= DEF_X_END(d) || DEF_X(d) >= x + w) continue;
                         int z1 = DEF_X(d) - x;
                         int z2 = DEF_X_END(d) - x;
-                        if (z1 > 0 && z1 < h) {
-                            int32_t total = IDX_4D(Fd_values, stride0, stride1, stride2, w, z1, x, y) +
-                                            IDX_4D(Fd_values, stride0, stride1, stride2, w, h-z1, x, y+z1);
+                        if (z1 > 0 && z1 < w) {
+                            int32_t total = IDX_4D(Fd_values, stride0, stride1, stride2, z1, h, x, y) +
+                                            IDX_4D(Fd_values, stride0, stride1, stride2, w-z1, h, x+z1, y);
                             if (total > best_val) best_val = total;
                         }
-                        if (z2 > 0 && z2 < h) {
-                            int32_t total = IDX_4D(Fd_values, stride0, stride1, stride2, w, z2, x, y) +
-                                            IDX_4D(Fd_values, stride0, stride1, stride2, w, h-z2, x, y+z2);
+                        if (z2 > 0 && z2 < w) {
+                            int32_t total = IDX_4D(Fd_values, stride0, stride1, stride2, z2, h, x, y) +
+                                            IDX_4D(Fd_values, stride0, stride1, stride2, w-z2, h, x+z2, y);
                             if (total > best_val) best_val = total;
                         }
                     }
