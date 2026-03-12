@@ -10,7 +10,7 @@ from guillotine.core.constants import (
 
 
 class GuillotineDP:
-    """Optimized DP solver."""
+    """Optimized DP solver with slab-based defected-rectangle storage."""
 
     def __init__(self, item_sizes, geometry, patterns):
         self.geom = geometry
@@ -28,10 +28,11 @@ class GuillotineDP:
         self.F_type   = np.zeros((self.W0 + 1, self.H0 + 1), dtype=np.int8)
         self.F_param  = np.zeros((self.W0 + 1, self.H0 + 1), dtype=np.int32)
 
-        # Defected rectangles: allocated lazily in _fill_Fd() to avoid
-        # wasting (W0+1)^4 × 6 bytes when the sheet is pure
+        # Slab Fd: PyCapsule wrapping C FdSlab (set during _fill_Fd)
+        self._fd_slab = None
+
+        # Legacy dense array (only used if slab is unavailable)
         self.Fd_values = None
-        self.Fd_packed = None
 
         self._precompute_g()
         self._precompute_F()
@@ -104,7 +105,6 @@ class GuillotineDP:
                 best_type  = DECISION_FILL if g_indices[w, h] >= 0 else DECISION_EMPTY
                 best_param = int(g_indices[w, h]) if g_indices[w, h] >= 0 else 0
 
-                # Vertical cuts — exploit symmetry, only try z <= w/2
                 half_w = w >> 1
                 for z in patterns.cuts_pure_x(w):
                     if z > half_w:
@@ -115,7 +115,6 @@ class GuillotineDP:
                         best_type  = DECISION_CUT_X
                         best_param = z
 
-                # Horizontal cuts — exploit symmetry, only try z <= h/2
                 half_h = h >> 1
                 for z in patterns.cuts_pure_y(h):
                     if z > half_h:
@@ -130,9 +129,39 @@ class GuillotineDP:
                 F_type[w, h]   = best_type
                 F_param[w, h]  = best_param
 
+    def _fd_value(self, w, h, x, y):
+        """Look up Fd value using slab (preferred) or dense array (legacy)."""
+        if self._fd_slab is not None:
+            from guillotine.core import _solver
+            return _solver.fd_slab_lookup(self._fd_slab, self.F_values, self.H0, w, h, x, y)
+        else:
+            return int(self.Fd_values[w, h, x, y])
+
     def _fill_Fd(self):
-        shape = (self.W0+1, self.H0+1, self.W0+1, self.H0+1)
-        self.Fd_values = np.zeros(shape, dtype=np.uint32)
+        """Fill defected rectangle DP table using slab storage."""
+        try:
+            from guillotine.core import _solver
+            self._fd_slab = _solver.fill_Fd_slab(
+                self.W0, self.H0,
+                self.geom.prefix, self.F_values,
+                self.patterns.np_x_arr, self.patterns.np_x_len,
+                self.patterns.np_y_arr, self.patterns.np_y_len,
+                self.geom.defects_arr,
+                int(self.patterns.np_x_arr.shape[1]),
+                int(self.patterns.np_y_arr.shape[1]),
+                self.geom.n_def,
+            )
+            slab_entries, dense_entries = _solver.fd_slab_stats(self._fd_slab)
+            print(f"Fd slab: {slab_entries:,} entries ({slab_entries * 4 / 1024 / 1024:.1f} MB), "
+                  f"vs dense {dense_entries:,} ({dense_entries * 4 / 1024 / 1024:.1f} MB), "
+                  f"ratio {slab_entries / max(dense_entries, 1) * 100:.2f}%")
+            return
+        except ImportError:
+            pass
+
+        # Legacy dense fallback
+        shape = (self.W0 + 1, self.H0 + 1, self.W0 + 1, self.H0 + 1)
+        self.Fd_values = np.zeros(shape, dtype=np.int32)
 
         try:
             from guillotine.core import _solver
@@ -141,10 +170,11 @@ class GuillotineDP:
                 self.patterns.np_x_arr, self.patterns.np_x_len,
                 self.patterns.np_y_arr, self.patterns.np_y_len,
                 self.geom.defects_arr,
-                int(self.patterns.np_x_arr.shape[1]), int(self.patterns.np_y_arr.shape[1]), self.geom.n_def
+                int(self.patterns.np_x_arr.shape[1]),
+                int(self.patterns.np_y_arr.shape[1]),
+                self.geom.n_def
             )
         except ImportError:
-            # Python fallback would implement the same value-only logic
             pass
 
     def _reconstruct_F(self, w, h):
@@ -167,41 +197,37 @@ class GuillotineDP:
 
     def _reconstruct_Fd(self, x, y, w, h):
         """Finds the optimal cut by checking which candidate cut produces the target value."""
-        if w <= 0 or h <= 0: 
+        if w <= 0 or h <= 0:
             return 'empty'
-        
-        target_val = int(self.Fd_values[w, h, x, y])
 
-        # If value is zero, distinguish between empty area and full defect
+        target_val = self._fd_value(w, h, x, y)
+
         if target_val == 0:
             if self.geom.prefix[x+w, y+h] - self.geom.prefix[x, y+h] - self.geom.prefix[x+w, y] + self.geom.prefix[x, y] > 0:
                 return 'defect'
             return 'empty'
 
-        # If pure, delegate to the 2D reconstruction (which still has types/params)
+        # If pure, delegate to 2D reconstruction
         if self.geom.prefix[x+w, y+h] - self.geom.prefix[x, y+h] - self.geom.prefix[x+w, y] + self.geom.prefix[x, y] == 0:
             return self._reconstruct_F(w, h)
 
-        # Get the same candidate cuts used in the C solver
         X_cuts, Y_cuts = self.patterns.cuts_defected(x, y, w, h)
 
-        # Re-check X cuts: Sum of values must equal target_val
         for z in X_cuts:
-            if int(self.Fd_values[z, h, x, y]) + int(self.Fd_values[w - z, h, x+z, y]) == target_val:
+            if self._fd_value(z, h, x, y) + self._fd_value(w - z, h, x + z, y) == target_val:
                 return ('X', z, self._reconstruct_Fd(x, y, z, h), self._reconstruct_Fd(x + z, y, w - z, h))
 
-        # Re-check Y cuts
         for z in Y_cuts:
-            if int(self.Fd_values[w, z, x, y]) + int(self.Fd_values[w, h - z, x, y+z]) == target_val:
+            if self._fd_value(w, z, x, y) + self._fd_value(w, h - z, x, y + z) == target_val:
                 return ('Y', z, self._reconstruct_Fd(x, y, w, z), self._reconstruct_Fd(x, y + z, w, h - z))
 
-        return 'defect' # Base case for pieces that contain a defect but cannot be cut further
+        return 'defect'
 
     def solve(self):
         if self.geom.is_pure(0, 0, self.W0, self.H0):
             return int(self.F_values[self.W0, self.H0]), self._reconstruct_F(self.W0, self.H0)
 
         self._fill_Fd()
-        val = int(self.Fd_values[self.W0, self.H0, 0, 0])
+        val = self._fd_value(self.W0, self.H0, 0, 0)
         seq = self._reconstruct_Fd(0, 0, self.W0, self.H0)
         return val, seq

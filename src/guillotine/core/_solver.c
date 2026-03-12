@@ -1,6 +1,8 @@
-#define PY_SSIZE_T_CLEAN // Ensure Py_ssize_t is defined before including Python.h
-#include <Python.h> // Python C API header
-#include <stdint.h> // for fixed-width integer types like int32_t, int16_t
+#define PY_SSIZE_T_CLEAN
+#include <Python.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 /* Decision type constants - must match constants.py */
 #define DECISION_EMPTY  0
@@ -10,126 +12,84 @@
 #define DECISION_DEFECT 4
 #define DECISION_PURE   5
 
-/* Defect array access macros (each defect entry has NR_DEFECT_FIELDS fields) */
+/* Defect array access macros */
 #define NR_DEFECT_FIELDS 6
-#define DEF_X(d)     defects[(d)*NR_DEFECT_FIELDS + 0]  /* x start of defect bounding box */
-#define DEF_Y(d)     defects[(d)*NR_DEFECT_FIELDS + 1]  /* y start of defect bounding box */
-#define DEF_W(d)     defects[(d)*NR_DEFECT_FIELDS + 2]  /* width  of defect bounding box */
-#define DEF_H(d)     defects[(d)*NR_DEFECT_FIELDS + 3]  /* height of defect bounding box */
-#define DEF_X_END(d) defects[(d)*NR_DEFECT_FIELDS + 4]  /* x end  of defect bounding box (exclusive) */
-#define DEF_Y_END(d) defects[(d)*NR_DEFECT_FIELDS + 5]  /* y end  of defect bounding box (exclusive) */
+#define DEF_X(d)     defects[(d)*NR_DEFECT_FIELDS + 0]
+#define DEF_Y(d)     defects[(d)*NR_DEFECT_FIELDS + 1]
+#define DEF_W(d)     defects[(d)*NR_DEFECT_FIELDS + 2]
+#define DEF_H(d)     defects[(d)*NR_DEFECT_FIELDS + 3]
+#define DEF_X_END(d) defects[(d)*NR_DEFECT_FIELDS + 4]
+#define DEF_Y_END(d) defects[(d)*NR_DEFECT_FIELDS + 5]
 
-/*
- * Bit layout for Fd_packed (int16_t):
- *   bits 15-13 : decision type (DECISION_* constants, values 0-5, fits in 3 bits)
- *   bits 12-0  : cut parameter (cut position z, max value 8191, covers any practical sheet)
- *
- * Pack:   packed = ((int16_t)type << 13) | ((int16_t)param & 0x1FFF)
- * Unpack: type   = (packed >> 13) & 0x7
- *         param  = packed & 0x1FFF
- */
+/* Bit packing for Fd decisions (int16_t) */
 #define PACK_FD(type, param)   (((int16_t)(type) << 13) | ((int16_t)(param) & 0x1FFF))
 #define UNPACK_TYPE(packed)    (((packed) >> 13) & 0x7)
 #define UNPACK_PARAM(packed)   ((packed) & 0x1FFF)
 
-/*
- * Array index macros.
- * prefix, F_values are 2D: shape (W0+1, H0+1)
- * Fd_values is 4D int32_t: shape (W0+1, H0+1, W0+1, H0+1)
- * Fd_packed is 4D int16_t: shape (W0+1, H0+1, W0+1, H0+1), same layout
- */
+/* 2D array indexing */
 #define IDX_2D(arr, stride1, i, j) ((arr)[(i) * (stride1) + (j)])
-#define IDX_4D(arr, stride0, stride1, stride2, w, h, x, y) ((arr)[(int64_t)(w) * (stride0) + (int64_t)(h) * (stride1) + (int64_t)(x) * (stride2) + (y)])
-/*
- * Precompute g: best single-item tiling value and item index for each rectangle size.
- * g_values[w,h] = best area achievable by tiling w×h with copies of one item type
- * g_indices[w,h] = index of that item type, or -1 if no item fits
- *
- * Arrays: g_values, g_indices are 2D (W0+1, H0+1)
- *         item_w, item_h, item_area are 1D (n_items,)
- */
+
+/* ========================================================================
+ * fill_g_core — unchanged
+ * ======================================================================== */
 static void fill_g_core(
     int W0, int H0,
-    int32_t *g_values,   /* output: (W0+1, H0+1) */
-    int32_t *g_indices,  /* output: (W0+1, H0+1) */
-    int32_t *item_w,     /* (n_items,) */
-    int32_t *item_h,     /* (n_items,) */
-    int32_t *item_area,  /* (n_items,) */
+    int32_t *g_values, int32_t *g_indices,
+    int32_t *item_w, int32_t *item_h, int32_t *item_area,
     int n_items
 ) {
     int stride = H0 + 1;
-
     for (int w = 1; w <= W0; w++) {
-
         int w_stride = w * stride;
         int nx_table[n_items];
-
         for (int i = 0; i < n_items; i++)
             nx_table[i] = w / item_w[i];
-
         for (int h = 1; h <= H0; h++) {
-
             int32_t best_val = 0;
             int32_t best_idx = -1;
-
             for (int i = 0; i < n_items; i++) {
                 int nx = nx_table[i];
                 int ny = h / item_h[i];
-
                 if (nx > 0 && ny > 0) {
                     int32_t val = item_area[i] * nx * ny;
-
                     if (val > best_val) {
                         best_val = val;
                         best_idx = i;
                     }
                 }
             }
-
             g_values [w_stride + h] = best_val;
             g_indices[w_stride + h] = best_idx;
         }
     }
 }
 
-/*
- * Bottom-up DP for pure rectangles (no defects).
- * F_values[w,h] = optimal value for pure w×h rectangle
- * F_type[w,h]   = decision type (DECISION_EMPTY/FILL/CUT_X/CUT_Y)
- * F_param[w,h]  = decision parameter (item index for FILL, cut position for CUT)
- *
- * Uses symmetry: only tries cuts up to half the dimension.
- * Normal pattern arrays encode which cut positions are valid.
- */
+/* ========================================================================
+ * fill_F_core — unchanged
+ * ======================================================================== */
 static void fill_F_core(
     int W0, int H0,
-    int32_t *g_values,   /* (W0+1, H0+1) */
-    int32_t *g_indices,  /* (W0+1, H0+1) */
-    int32_t *F_values,   /* output: (W0+1, H0+1) */
-    int8_t  *F_type,     /* output: (W0+1, H0+1) */
-    int32_t *F_param,    /* output: (W0+1, H0+1) */
+    int32_t *g_values, int32_t *g_indices,
+    int32_t *F_values, int8_t *F_type, int32_t *F_param,
     int32_t *np_x_arr, int32_t *np_x_len, int max_cuts_x,
     int32_t *np_y_arr, int32_t *np_y_len, int max_cuts_y
 ) {
     int stride = H0 + 1;
-
     for (int w = 1; w <= W0; w++) {
-        int nx         = np_x_len[w];
-        int w_stride   = w * stride;
+        int nx       = np_x_len[w];
+        int w_stride = w * stride;
         int x_cut_base = w * max_cuts_x;
-        int half_w     = w >> 1;
-
+        int half_w   = w >> 1;
         for (int h = 1; h <= H0; h++) {
-            int ny         = np_y_len[h];
+            int ny       = np_y_len[h];
             int y_cut_base = h * max_cuts_y;
-            int half_h     = h >> 1;
+            int half_h   = h >> 1;
 
             int32_t g_idx    = g_indices[w_stride + h];
             int32_t best_val = g_values [w_stride + h];
             int     best_type  = (g_idx >= 0) ? DECISION_FILL : DECISION_EMPTY;
             int32_t best_param = (g_idx >= 0) ? g_idx : 0;
 
-            /* Vertical cuts — symmetry: only z <= w/2 */
             for (int i = 0; i < nx; i++) {
                 int z = np_x_arr[x_cut_base + i];
                 if (z > half_w) break;
@@ -140,8 +100,6 @@ static void fill_F_core(
                     best_param = z;
                 }
             }
-
-            /* Horizontal cuts — symmetry: only z <= h/2 */
             for (int i = 0; i < ny; i++) {
                 int z = np_y_arr[y_cut_base + i];
                 if (z > half_h) break;
@@ -152,7 +110,6 @@ static void fill_F_core(
                     best_param = z;
                 }
             }
-
             F_values[w_stride + h] = best_val;
             F_type  [w_stride + h] = (int8_t)best_type;
             F_param [w_stride + h] = best_param;
@@ -160,19 +117,337 @@ static void fill_F_core(
     }
 }
 
-/*
- * Core fill function for defected rectangles.
- * All arrays are passed as raw pointers — numpy guarantees contiguous memory.
+/* ========================================================================
+ * Slab-based Fd storage
  *
- * Memory layout vs previous version:
- *   Fd_values: int32_t  (values are always non-negative)
- *   Fd_type + Fd_param → Fd_packed int16_t  (saves 1 array, 33% less memory for Fd tables)
- */
-static void fill_Fd_core(
+ * Key insight: for each (w,h), only (x,y) positions whose rectangle
+ * [x,x+w) x [y,y+h) overlaps a defect need storage. We compute the
+ * bounding box of all such (x,y) per (w,h) and allocate a dense sub-array
+ * ("slab tile") covering just that range.
+ *
+ * Lookup: bounds-check (x,y) against the tile; if outside → return F_values[w,h].
+ * Inside the tile, some positions may still be pure (the BB is a superset of
+ * the true defected set), so we pre-fill those with F_values[w,h].
+ *
+ * This gives O(1) lookup (bounds check + flat index), OpenMP-friendly fill,
+ * and memory proportional to the defect footprint rather than the full sheet.
+ * ======================================================================== */
+
+typedef struct {
+    int x_lo, x_hi;   /* inclusive bounds of slab tile in x */
+    int y_lo, y_hi;   /* inclusive bounds of slab tile in y */
+    int x_span;       /* x_hi - x_lo + 1, or 0 if empty */
+    int y_span;       /* y_hi - y_lo + 1, or 0 if empty */
+    int64_t offset;   /* byte offset into the flat data array */
+} SlabMeta;
+
+typedef struct {
+    int32_t  *data;
+    SlabMeta *meta;   /* (W0+1) * (H0+1) entries */
+    int64_t   total;  /* total int32_t entries in data */
+    int       W0, H0;
+} FdSlab;
+
+static inline int32_t fd_slab_lookup(
+    const FdSlab *slab, const int32_t *F_values, int stride_F,
+    int w, int h, int x, int y
+) {
+    const SlabMeta *m = &slab->meta[w * (slab->H0 + 1) + h];
+    if (m->x_span > 0 &&
+        x >= m->x_lo && x <= m->x_hi &&
+        y >= m->y_lo && y <= m->y_hi)
+    {
+        return slab->data[m->offset + (int64_t)(x - m->x_lo) * m->y_span + (y - m->y_lo)];
+    }
+    return F_values[w * stride_F + h];
+}
+
+static inline void fd_slab_set(
+    FdSlab *slab, int w, int h, int x, int y, int32_t value
+) {
+    SlabMeta *m = &slab->meta[w * (slab->H0 + 1) + h];
+    slab->data[m->offset + (int64_t)(x - m->x_lo) * m->y_span + (y - m->y_lo)] = value;
+}
+
+static FdSlab *fill_Fd_slab(
     int W0, int H0,
     int32_t *prefix,
     int32_t *F_values,
-    int32_t *Fd_values,
+    int32_t *np_x_arr, int32_t *np_x_len, int max_cuts_x,
+    int32_t *np_y_arr, int32_t *np_y_len, int max_cuts_y,
+    int32_t *defects, int n_def
+) {
+    int stride_p = H0 + 1;
+    int stride_F = H0 + 1;
+    int meta_count = (W0 + 1) * (H0 + 1);
+
+    FdSlab *slab = (FdSlab *)malloc(sizeof(FdSlab));
+    if (!slab) return NULL;
+    slab->W0 = W0;
+    slab->H0 = H0;
+    slab->data = NULL;
+    slab->meta = NULL;
+
+    SlabMeta *meta = (SlabMeta *)calloc(meta_count, sizeof(SlabMeta));
+    if (!meta) { free(slab); return NULL; }
+    slab->meta = meta;
+
+    /* ---- Phase 1: per-(w,h) bounding boxes ---- */
+    for (int w = 1; w <= W0; w++) {
+        for (int h = 1; h <= H0; h++) {
+            int gx_lo = W0 + 1, gx_hi = -1;
+            int gy_lo = H0 + 1, gy_hi = -1;
+
+            for (int d = 0; d < n_def; d++) {
+                int x_lo = DEF_X(d) - w + 1;
+                if (x_lo < 0) x_lo = 0;
+                int x_hi = DEF_X_END(d) - 1;
+                if (x_hi > W0 - w) x_hi = W0 - w;
+
+                int y_lo = DEF_Y(d) - h + 1;
+                if (y_lo < 0) y_lo = 0;
+                int y_hi = DEF_Y_END(d) - 1;
+                if (y_hi > H0 - h) y_hi = H0 - h;
+
+                if (x_lo > x_hi || y_lo > y_hi) continue;
+
+                if (x_lo < gx_lo) gx_lo = x_lo;
+                if (x_hi > gx_hi) gx_hi = x_hi;
+                if (y_lo < gy_lo) gy_lo = y_lo;
+                if (y_hi > gy_hi) gy_hi = y_hi;
+            }
+
+            SlabMeta *m = &meta[w * (H0 + 1) + h];
+            if (gx_hi >= 0 && gy_hi >= 0) {
+                m->x_lo = gx_lo; m->x_hi = gx_hi;
+                m->y_lo = gy_lo; m->y_hi = gy_hi;
+                m->x_span = gx_hi - gx_lo + 1;
+                m->y_span = gy_hi - gy_lo + 1;
+            }
+            /* else: x_span = y_span = 0 from calloc */
+        }
+    }
+
+    /* ---- Phase 2: compute offsets ---- */
+    int64_t total = 0;
+    for (int wh = 0; wh < meta_count; wh++) {
+        meta[wh].offset = total;
+        total += (int64_t)meta[wh].x_span * meta[wh].y_span;
+    }
+    slab->total = total;
+
+    /* ---- Phase 3: allocate data ---- */
+    if (total > 0) {
+        slab->data = (int32_t *)malloc(total * sizeof(int32_t));
+        if (!slab->data) {
+            free(meta); free(slab);
+            return NULL;
+        }
+    }
+
+    /* ---- Phase 4: pre-fill every slab tile with F_values[w,h] ----
+     * This ensures that pure positions inside the bounding box
+     * already contain the correct value, so the DP loop can skip them
+     * and lookups always return the right answer. */
+    for (int w = 1; w <= W0; w++) {
+        for (int h = 1; h <= H0; h++) {
+            SlabMeta *m = &meta[w * (H0 + 1) + h];
+            if (m->x_span == 0) continue;
+            int32_t fval = F_values[w * stride_F + h];
+            int64_t tile_size = (int64_t)m->x_span * m->y_span;
+            int32_t *tile = &slab->data[m->offset];
+            for (int64_t i = 0; i < tile_size; i++)
+                tile[i] = fval;
+        }
+    }
+
+    /* ---- Phase 5: DP fill — only iterate slab ranges ---- */
+    for (int w = 1; w <= W0; w++) {
+        int nx = np_x_len[w];
+        int w_max_cuts_x = w * max_cuts_x;
+
+        for (int h = 1; h <= H0; h++) {
+            int ny = np_y_len[h];
+            int h_max_cuts_y = h * max_cuts_y;
+            SlabMeta *m = &meta[w * (H0 + 1) + h];
+
+            if (m->x_span == 0) continue;
+
+            #pragma omp parallel for schedule(dynamic, 4) collapse(2)
+            for (int x = m->x_lo; x <= m->x_hi; x++) {
+                for (int y = m->y_lo; y <= m->y_hi; y++) {
+
+                    /* Check if actually defected via prefix sum */
+                    int32_t dc =
+                        IDX_2D(prefix, stride_p, x+w, y+h)
+                      - IDX_2D(prefix, stride_p, x,   y+h)
+                      - IDX_2D(prefix, stride_p, x+w, y  )
+                      + IDX_2D(prefix, stride_p, x,   y  );
+
+                    if (dc == 0) {
+                        /* Pure — already pre-filled with F_values[w,h], skip */
+                        continue;
+                    }
+
+                    int32_t best_val = 0;
+
+                    /* X cuts — normal pattern positions */
+                    for (int i = 0; i < nx; i++) {
+                        int z = np_x_arr[w_max_cuts_x + i];
+                        int32_t left  = fd_slab_lookup(slab, F_values, stride_F, z,   h, x,   y);
+                        int32_t right = fd_slab_lookup(slab, F_values, stride_F, w-z, h, x+z, y);
+                        int32_t t = left + right;
+                        if (t > best_val) best_val = t;
+                    }
+
+                    /* X cuts — defect-aligned */
+                    for (int d = 0; d < n_def; d++) {
+                        if (x >= DEF_X_END(d) || DEF_X(d) >= x + w) continue;
+                        int z1 = DEF_X(d) - x;
+                        int z2 = DEF_X_END(d) - x;
+                        if (z1 > 0 && z1 < w) {
+                            int32_t t = fd_slab_lookup(slab, F_values, stride_F, z1,   h, x,    y)
+                                      + fd_slab_lookup(slab, F_values, stride_F, w-z1, h, x+z1, y);
+                            if (t > best_val) best_val = t;
+                        }
+                        if (z2 > 0 && z2 < w) {
+                            int32_t t = fd_slab_lookup(slab, F_values, stride_F, z2,   h, x,    y)
+                                      + fd_slab_lookup(slab, F_values, stride_F, w-z2, h, x+z2, y);
+                            if (t > best_val) best_val = t;
+                        }
+                    }
+
+                    /* Y cuts — normal pattern positions */
+                    for (int i = 0; i < ny; i++) {
+                        int z = np_y_arr[h_max_cuts_y + i];
+                        int32_t top    = fd_slab_lookup(slab, F_values, stride_F, w, z,   x, y);
+                        int32_t bottom = fd_slab_lookup(slab, F_values, stride_F, w, h-z, x, y+z);
+                        int32_t t = top + bottom;
+                        if (t > best_val) best_val = t;
+                    }
+
+                    /* Y cuts — defect-aligned */
+                    for (int d = 0; d < n_def; d++) {
+                        if (y >= DEF_Y_END(d) || DEF_Y(d) >= y + h) continue;
+                        int z1 = DEF_Y(d) - y;
+                        int z2 = DEF_Y_END(d) - y;
+                        if (z1 > 0 && z1 < h) {
+                            int32_t t = fd_slab_lookup(slab, F_values, stride_F, w, z1,   x, y)
+                                      + fd_slab_lookup(slab, F_values, stride_F, w, h-z1, x, y+z1);
+                            if (t > best_val) best_val = t;
+                        }
+                        if (z2 > 0 && z2 < h) {
+                            int32_t t = fd_slab_lookup(slab, F_values, stride_F, w, z2,   x, y)
+                                      + fd_slab_lookup(slab, F_values, stride_F, w, h-z2, x, y+z2);
+                            if (t > best_val) best_val = t;
+                        }
+                    }
+
+                    fd_slab_set(slab, w, h, x, y, best_val);
+                }
+            }
+        }
+    }
+
+    return slab;
+}
+
+/* PyCapsule destructor */
+static void fd_slab_destructor(PyObject *capsule) {
+    FdSlab *slab = (FdSlab *)PyCapsule_GetPointer(capsule, "FdSlab");
+    if (slab) {
+        free(slab->data);
+        free(slab->meta);
+        free(slab);
+    }
+}
+
+/* ---- Python wrappers ---- */
+
+static PyObject* py_fill_Fd_slab(PyObject *self, PyObject *args) {
+    int W0, H0, max_cuts_x, max_cuts_y, n_def;
+    PyObject *o_pre, *o_F, *o_nx, *o_nlx, *o_ny, *o_nly, *o_def;
+
+    if (!PyArg_ParseTuple(args, "iiOOOOOOOiii",
+            &W0, &H0, &o_pre, &o_F,
+            &o_nx, &o_nlx, &o_ny, &o_nly, &o_def,
+            &max_cuts_x, &max_cuts_y, &n_def))
+        return NULL;
+
+    Py_buffer b_pre={0}, b_F={0}, b_nx={0}, b_nlx={0}, b_ny={0}, b_nly={0}, b_def={0};
+    if (PyObject_GetBuffer(o_pre, &b_pre, PyBUF_SIMPLE|PyBUF_C_CONTIGUOUS) < 0) goto fail;
+    if (PyObject_GetBuffer(o_F,   &b_F,   PyBUF_SIMPLE|PyBUF_C_CONTIGUOUS) < 0) goto fail;
+    if (PyObject_GetBuffer(o_nx,  &b_nx,  PyBUF_SIMPLE|PyBUF_C_CONTIGUOUS) < 0) goto fail;
+    if (PyObject_GetBuffer(o_nlx, &b_nlx, PyBUF_SIMPLE|PyBUF_C_CONTIGUOUS) < 0) goto fail;
+    if (PyObject_GetBuffer(o_ny,  &b_ny,  PyBUF_SIMPLE|PyBUF_C_CONTIGUOUS) < 0) goto fail;
+    if (PyObject_GetBuffer(o_nly, &b_nly, PyBUF_SIMPLE|PyBUF_C_CONTIGUOUS) < 0) goto fail;
+    if (PyObject_GetBuffer(o_def, &b_def, PyBUF_SIMPLE|PyBUF_C_CONTIGUOUS) < 0) goto fail;
+
+    FdSlab *slab = fill_Fd_slab(W0, H0,
+        (int32_t*)b_pre.buf, (int32_t*)b_F.buf,
+        (int32_t*)b_nx.buf, (int32_t*)b_nlx.buf, max_cuts_x,
+        (int32_t*)b_ny.buf, (int32_t*)b_nly.buf, max_cuts_y,
+        (int32_t*)b_def.buf, n_def);
+
+    PyBuffer_Release(&b_pre); PyBuffer_Release(&b_F);
+    PyBuffer_Release(&b_nx);  PyBuffer_Release(&b_nlx);
+    PyBuffer_Release(&b_ny);  PyBuffer_Release(&b_nly);
+    PyBuffer_Release(&b_def);
+
+    if (!slab) {
+        PyErr_SetString(PyExc_MemoryError, "Failed to allocate FdSlab");
+        return NULL;
+    }
+
+    PyObject *capsule = PyCapsule_New(slab, "FdSlab", fd_slab_destructor);
+    if (!capsule) {
+        free(slab->data); free(slab->meta); free(slab);
+        return NULL;
+    }
+    return capsule;
+
+fail:
+    PyBuffer_Release(&b_pre); PyBuffer_Release(&b_F);
+    PyBuffer_Release(&b_nx);  PyBuffer_Release(&b_nlx);
+    PyBuffer_Release(&b_ny);  PyBuffer_Release(&b_nly);
+    PyBuffer_Release(&b_def);
+    return NULL;
+}
+
+static PyObject* py_fd_slab_lookup(PyObject *self, PyObject *args) {
+    PyObject *capsule, *o_F;
+    int H0, w, h, x, y;
+    if (!PyArg_ParseTuple(args, "OOiiiii", &capsule, &o_F, &H0, &w, &h, &x, &y))
+        return NULL;
+
+    FdSlab *slab = (FdSlab *)PyCapsule_GetPointer(capsule, "FdSlab");
+    if (!slab) return NULL;
+
+    Py_buffer b_F = {0};
+    if (PyObject_GetBuffer(o_F, &b_F, PyBUF_SIMPLE|PyBUF_C_CONTIGUOUS) < 0) return NULL;
+
+    int32_t val = fd_slab_lookup(slab, (int32_t*)b_F.buf, H0 + 1, w, h, x, y);
+    PyBuffer_Release(&b_F);
+    return PyLong_FromLong(val);
+}
+
+static PyObject* py_fd_slab_stats(PyObject *self, PyObject *args) {
+    PyObject *capsule;
+    if (!PyArg_ParseTuple(args, "O", &capsule)) return NULL;
+    FdSlab *slab = (FdSlab *)PyCapsule_GetPointer(capsule, "FdSlab");
+    if (!slab) return NULL;
+
+    int64_t dense = (int64_t)(slab->W0+1) * (slab->W0+1) *
+                    (int64_t)(slab->H0+1) * (slab->H0+1);
+    return Py_BuildValue("(LL)", (long long)slab->total, (long long)dense);
+}
+
+/* ========================================================================
+ * Legacy dense fill_Fd — kept for backward compat, int64_t strides fixed
+ * ======================================================================== */
+static void fill_Fd_core(
+    int W0, int H0,
+    int32_t *prefix, int32_t *F_values, int32_t *Fd_values,
     int32_t *np_x_arr, int32_t *np_x_len, int max_cuts_x,
     int32_t *np_y_arr, int32_t *np_y_len, int max_cuts_y,
     int32_t *defects, int n_def
@@ -186,91 +461,75 @@ static void fill_Fd_core(
     for (int w = 1; w <= W0; w++) {
         int nx = np_x_len[w];
         int w_max_cuts_x = w * max_cuts_x;
-
         for (int h = 1; h <= H0; h++) {
             int ny = np_y_len[h];
             int h_max_cuts_y = h * max_cuts_y;
 
             #pragma omp parallel for schedule(dynamic, 16) collapse(2)
             for (int x = 0; x <= W0 - w; x++) {
-
                 for (int y = 0; y <= H0 - h; y++) {
-
-                    int32_t defect_count =
+                    int32_t dc =
                         IDX_2D(prefix, stride_p, x+w, y+h)
                       - IDX_2D(prefix, stride_p, x,   y+h)
                       - IDX_2D(prefix, stride_p, x+w, y  )
                       + IDX_2D(prefix, stride_p, x,   y  );
-
-                    if (defect_count == 0) {
-                        IDX_4D(Fd_values, stride0, stride1, stride2, w, h, x, y) = IDX_2D(F_values, stride_F, w, h);
+                    if (dc == 0) {
+                        Fd_values[(int64_t)w*stride0 + (int64_t)h*stride1 + (int64_t)x*stride2 + y] = IDX_2D(F_values, stride_F, w, h);
                         continue;
                     }
-
                     int32_t best_val = 0;
-
-                    /* X cuts — normal pattern positions */
                     for (int i = 0; i < nx; i++) {
                         int z = np_x_arr[w_max_cuts_x + i];
-                        int32_t total = IDX_4D(Fd_values, stride0, stride1, stride2, z, h, x, y) +
-                                        IDX_4D(Fd_values, stride0, stride1, stride2, w-z, h, x+z, y);
+                        int32_t total = Fd_values[(int64_t)z*stride0 + (int64_t)h*stride1 + (int64_t)x*stride2 + y]
+                                      + Fd_values[(int64_t)(w-z)*stride0 + (int64_t)h*stride1 + (int64_t)(x+z)*stride2 + y];
                         if (total > best_val) best_val = total;
                     }
-
-                    /* X cuts — defect-aligned positions */
                     for (int d = 0; d < n_def; d++) {
                         if (x >= DEF_X_END(d) || DEF_X(d) >= x + w) continue;
                         int z1 = DEF_X(d) - x;
                         int z2 = DEF_X_END(d) - x;
                         if (z1 > 0 && z1 < w) {
-                            int32_t total = IDX_4D(Fd_values, stride0, stride1, stride2, z1, h, x, y) +
-                                            IDX_4D(Fd_values, stride0, stride1, stride2, w-z1, h, x+z1, y);
+                            int32_t total = Fd_values[(int64_t)z1*stride0 + (int64_t)h*stride1 + (int64_t)x*stride2 + y]
+                                          + Fd_values[(int64_t)(w-z1)*stride0 + (int64_t)h*stride1 + (int64_t)(x+z1)*stride2 + y];
                             if (total > best_val) best_val = total;
                         }
                         if (z2 > 0 && z2 < w) {
-                            int32_t total = IDX_4D(Fd_values, stride0, stride1, stride2, z2, h, x, y) +
-                                            IDX_4D(Fd_values, stride0, stride1, stride2, w-z2, h, x+z2, y);
+                            int32_t total = Fd_values[(int64_t)z2*stride0 + (int64_t)h*stride1 + (int64_t)x*stride2 + y]
+                                          + Fd_values[(int64_t)(w-z2)*stride0 + (int64_t)h*stride1 + (int64_t)(x+z2)*stride2 + y];
                             if (total > best_val) best_val = total;
                         }
                     }
-
-                    /* Y cuts — normal pattern positions */
                     for (int i = 0; i < ny; i++) {
                         int z = np_y_arr[h_max_cuts_y + i];
-                        int32_t total = IDX_4D(Fd_values, stride0, stride1, stride2, w, z, x, y) +
-                                        IDX_4D(Fd_values, stride0, stride1, stride2, w, h-z, x, y+z);
+                        int32_t total = Fd_values[(int64_t)w*stride0 + (int64_t)z*stride1 + (int64_t)x*stride2 + y]
+                                      + Fd_values[(int64_t)w*stride0 + (int64_t)(h-z)*stride1 + (int64_t)x*stride2 + (y+z)];
                         if (total > best_val) best_val = total;
                     }
-
-                    /* Y cuts — defect-aligned positions */
                     for (int d = 0; d < n_def; d++) {
                         if (y >= DEF_Y_END(d) || DEF_Y(d) >= y + h) continue;
                         int z1 = DEF_Y(d) - y;
                         int z2 = DEF_Y_END(d) - y;
                         if (z1 > 0 && z1 < h) {
-                            int32_t total = IDX_4D(Fd_values, stride0, stride1, stride2, w, z1, x, y) +
-                                            IDX_4D(Fd_values, stride0, stride1, stride2, w, h-z1, x, y+z1);
+                            int32_t total = Fd_values[(int64_t)w*stride0 + (int64_t)z1*stride1 + (int64_t)x*stride2 + y]
+                                          + Fd_values[(int64_t)w*stride0 + (int64_t)(h-z1)*stride1 + (int64_t)x*stride2 + (y+z1)];
                             if (total > best_val) best_val = total;
                         }
                         if (z2 > 0 && z2 < h) {
-                            int32_t total = IDX_4D(Fd_values, stride0, stride1, stride2, w, z2, x, y) +
-                                            IDX_4D(Fd_values, stride0, stride1, stride2, w, h-z2, x, y+z2);
+                            int32_t total = Fd_values[(int64_t)w*stride0 + (int64_t)z2*stride1 + (int64_t)x*stride2 + y]
+                                          + Fd_values[(int64_t)w*stride0 + (int64_t)(h-z2)*stride1 + (int64_t)x*stride2 + (y+z2)];
                             if (total > best_val) best_val = total;
                         }
                     }
-
-                    IDX_4D(Fd_values, stride0, stride1, stride2, w, h, x, y) = best_val;
+                    Fd_values[(int64_t)w*stride0 + (int64_t)h*stride1 + (int64_t)x*stride2 + y] = best_val;
                 }
             }
         }
     }
 }
 
-/* Python wrapper for fill_Fd_core */
 static PyObject* py_fill_Fd(PyObject *self, PyObject *args) {
     int W0, H0, max_cuts_x, max_cuts_y, n_def;
     PyObject *o_pre, *o_F, *o_Fd, *o_nx, *o_nlx, *o_ny, *o_nly, *o_def;
-
     if (!PyArg_ParseTuple(args, "iiOOOOOOOOiii", &W0, &H0, &o_pre, &o_F, &o_Fd,
                              &o_nx, &o_nlx, &o_ny, &o_nly, &o_def,
                              &max_cuts_x, &max_cuts_y, &n_def)) return NULL;
@@ -287,7 +546,8 @@ static PyObject* py_fill_Fd(PyObject *self, PyObject *args) {
 
     fill_Fd_core(W0, H0, (int32_t*)b_pre.buf, (int32_t*)b_F.buf, (int32_t*)b_Fd.buf,
                  (int32_t*)b_nx.buf, (int32_t*)b_nlx.buf, max_cuts_x,
-                 (int32_t*)b_ny.buf, (int32_t*)b_nly.buf, max_cuts_y, (int32_t*)b_def.buf, n_def);
+                 (int32_t*)b_ny.buf, (int32_t*)b_nly.buf, max_cuts_y,
+                 (int32_t*)b_def.buf, n_def);
 
     PyBuffer_Release(&b_pre); PyBuffer_Release(&b_F); PyBuffer_Release(&b_Fd);
     PyBuffer_Release(&b_nx); PyBuffer_Release(&b_nlx); PyBuffer_Release(&b_ny);
@@ -295,136 +555,80 @@ static PyObject* py_fill_Fd(PyObject *self, PyObject *args) {
     Py_RETURN_NONE;
 }
 
-/* Python wrapper for fill_g_core */
-static PyObject* py_fill_g(PyObject *self, PyObject *args)
-{
+/* fill_g / fill_F wrappers — unchanged */
+static PyObject* py_fill_g(PyObject *self, PyObject *args) {
     int W0, H0, n_items;
     PyObject *o_g_values, *o_g_indices, *o_item_w, *o_item_h, *o_item_area;
-
     if (!PyArg_ParseTuple(args, "iiOOOOOi",
-            &W0, &H0,
-            &o_g_values, &o_g_indices,
-            &o_item_w, &o_item_h, &o_item_area,
-            &n_items))
+            &W0, &H0, &o_g_values, &o_g_indices,
+            &o_item_w, &o_item_h, &o_item_area, &n_items))
         return NULL;
-
-    Py_buffer buf_g_values = {0}, buf_g_indices = {0};
-    Py_buffer buf_item_w = {0}, buf_item_h = {0}, buf_item_area = {0};
-
-    if (PyObject_GetBuffer(o_g_values,  &buf_g_values,  PyBUF_SIMPLE | PyBUF_C_CONTIGUOUS) < 0) goto fail_g;
-    if (PyObject_GetBuffer(o_g_indices, &buf_g_indices, PyBUF_SIMPLE | PyBUF_C_CONTIGUOUS) < 0) goto fail_g;
-    if (PyObject_GetBuffer(o_item_w,    &buf_item_w,    PyBUF_SIMPLE | PyBUF_C_CONTIGUOUS) < 0) goto fail_g;
-    if (PyObject_GetBuffer(o_item_h,    &buf_item_h,    PyBUF_SIMPLE | PyBUF_C_CONTIGUOUS) < 0) goto fail_g;
-    if (PyObject_GetBuffer(o_item_area, &buf_item_area, PyBUF_SIMPLE | PyBUF_C_CONTIGUOUS) < 0) goto fail_g;
-
-    fill_g_core(
-        W0, H0,
-        (int32_t *) buf_g_values.buf,
-        (int32_t *) buf_g_indices.buf,
-        (int32_t *) buf_item_w.buf,
-        (int32_t *) buf_item_h.buf,
-        (int32_t *) buf_item_area.buf,
-        n_items
-    );
-
-    PyBuffer_Release(&buf_g_values);
-    PyBuffer_Release(&buf_g_indices);
-    PyBuffer_Release(&buf_item_w);
-    PyBuffer_Release(&buf_item_h);
-    PyBuffer_Release(&buf_item_area);
+    Py_buffer bv={0},bi={0},bw={0},bh={0},ba={0};
+    if (PyObject_GetBuffer(o_g_values,  &bv, PyBUF_SIMPLE|PyBUF_C_CONTIGUOUS) < 0) goto fg;
+    if (PyObject_GetBuffer(o_g_indices, &bi, PyBUF_SIMPLE|PyBUF_C_CONTIGUOUS) < 0) goto fg;
+    if (PyObject_GetBuffer(o_item_w,    &bw, PyBUF_SIMPLE|PyBUF_C_CONTIGUOUS) < 0) goto fg;
+    if (PyObject_GetBuffer(o_item_h,    &bh, PyBUF_SIMPLE|PyBUF_C_CONTIGUOUS) < 0) goto fg;
+    if (PyObject_GetBuffer(o_item_area, &ba, PyBUF_SIMPLE|PyBUF_C_CONTIGUOUS) < 0) goto fg;
+    fill_g_core(W0,H0,(int32_t*)bv.buf,(int32_t*)bi.buf,
+        (int32_t*)bw.buf,(int32_t*)bh.buf,(int32_t*)ba.buf,n_items);
+    PyBuffer_Release(&bv);PyBuffer_Release(&bi);
+    PyBuffer_Release(&bw);PyBuffer_Release(&bh);PyBuffer_Release(&ba);
     Py_RETURN_NONE;
-
-fail_g:
-    PyBuffer_Release(&buf_g_values);
-    PyBuffer_Release(&buf_g_indices);
-    PyBuffer_Release(&buf_item_w);
-    PyBuffer_Release(&buf_item_h);
-    PyBuffer_Release(&buf_item_area);
+fg:
+    PyBuffer_Release(&bv);PyBuffer_Release(&bi);
+    PyBuffer_Release(&bw);PyBuffer_Release(&bh);PyBuffer_Release(&ba);
     return NULL;
 }
 
-/* Python wrapper for fill_F_core */
-static PyObject* py_fill_F(PyObject *self, PyObject *args)
-{
-    int W0, H0, max_cuts_x, max_cuts_y;
-    PyObject *o_g_values, *o_g_indices;
-    PyObject *o_F_values, *o_F_type, *o_F_param;
-    PyObject *o_np_x_arr, *o_np_x_len;
-    PyObject *o_np_y_arr, *o_np_y_len;
-
-    if (!PyArg_ParseTuple(args, "iiOOOOOOOOOii",
-            &W0, &H0,
-            &o_g_values, &o_g_indices,
-            &o_F_values, &o_F_type, &o_F_param,
-            &o_np_x_arr, &o_np_x_len,
-            &o_np_y_arr, &o_np_y_len,
-            &max_cuts_x, &max_cuts_y))
+static PyObject* py_fill_F(PyObject *self, PyObject *args) {
+    int W0,H0,mcx,mcy;
+    PyObject *ogv,*ogi,*ofv,*oft,*ofp,*onx,*onlx,*ony,*only;
+    if (!PyArg_ParseTuple(args,"iiOOOOOOOOOii",
+            &W0,&H0,&ogv,&ogi,&ofv,&oft,&ofp,&onx,&onlx,&ony,&only,&mcx,&mcy))
         return NULL;
-
-    Py_buffer buf_g_values = {0}, buf_g_indices = {0};
-    Py_buffer buf_F_values = {0}, buf_F_type = {0}, buf_F_param = {0};
-    Py_buffer buf_np_x_arr = {0}, buf_np_x_len = {0};
-    Py_buffer buf_np_y_arr = {0}, buf_np_y_len = {0};
-
-    if (PyObject_GetBuffer(o_g_values,  &buf_g_values,  PyBUF_SIMPLE | PyBUF_C_CONTIGUOUS) < 0) goto fail_F;
-    if (PyObject_GetBuffer(o_g_indices, &buf_g_indices, PyBUF_SIMPLE | PyBUF_C_CONTIGUOUS) < 0) goto fail_F;
-    if (PyObject_GetBuffer(o_F_values,  &buf_F_values,  PyBUF_SIMPLE | PyBUF_C_CONTIGUOUS) < 0) goto fail_F;
-    if (PyObject_GetBuffer(o_F_type,    &buf_F_type,    PyBUF_SIMPLE | PyBUF_C_CONTIGUOUS) < 0) goto fail_F;
-    if (PyObject_GetBuffer(o_F_param,   &buf_F_param,   PyBUF_SIMPLE | PyBUF_C_CONTIGUOUS) < 0) goto fail_F;
-    if (PyObject_GetBuffer(o_np_x_arr,  &buf_np_x_arr,  PyBUF_SIMPLE | PyBUF_C_CONTIGUOUS) < 0) goto fail_F;
-    if (PyObject_GetBuffer(o_np_x_len,  &buf_np_x_len,  PyBUF_SIMPLE | PyBUF_C_CONTIGUOUS) < 0) goto fail_F;
-    if (PyObject_GetBuffer(o_np_y_arr,  &buf_np_y_arr,  PyBUF_SIMPLE | PyBUF_C_CONTIGUOUS) < 0) goto fail_F;
-    if (PyObject_GetBuffer(o_np_y_len,  &buf_np_y_len,  PyBUF_SIMPLE | PyBUF_C_CONTIGUOUS) < 0) goto fail_F;
-
-    fill_F_core(
-        W0, H0,
-        (int32_t *) buf_g_values.buf,
-        (int32_t *) buf_g_indices.buf,
-        (int32_t *) buf_F_values.buf,
-        (int8_t  *) buf_F_type.buf,
-        (int32_t *) buf_F_param.buf,
-        (int32_t *) buf_np_x_arr.buf, (int32_t *) buf_np_x_len.buf, max_cuts_x,
-        (int32_t *) buf_np_y_arr.buf, (int32_t *) buf_np_y_len.buf, max_cuts_y
-    );
-
-    PyBuffer_Release(&buf_g_values);
-    PyBuffer_Release(&buf_g_indices);
-    PyBuffer_Release(&buf_F_values);
-    PyBuffer_Release(&buf_F_type);
-    PyBuffer_Release(&buf_F_param);
-    PyBuffer_Release(&buf_np_x_arr);
-    PyBuffer_Release(&buf_np_x_len);
-    PyBuffer_Release(&buf_np_y_arr);
-    PyBuffer_Release(&buf_np_y_len);
+    Py_buffer bgv={0},bgi={0},bfv={0},bft={0},bfp={0},bnx={0},bnlx={0},bny={0},bnly={0};
+    if (PyObject_GetBuffer(ogv,  &bgv,  PyBUF_SIMPLE|PyBUF_C_CONTIGUOUS)<0) goto fF;
+    if (PyObject_GetBuffer(ogi,  &bgi,  PyBUF_SIMPLE|PyBUF_C_CONTIGUOUS)<0) goto fF;
+    if (PyObject_GetBuffer(ofv,  &bfv,  PyBUF_SIMPLE|PyBUF_C_CONTIGUOUS)<0) goto fF;
+    if (PyObject_GetBuffer(oft,  &bft,  PyBUF_SIMPLE|PyBUF_C_CONTIGUOUS)<0) goto fF;
+    if (PyObject_GetBuffer(ofp,  &bfp,  PyBUF_SIMPLE|PyBUF_C_CONTIGUOUS)<0) goto fF;
+    if (PyObject_GetBuffer(onx,  &bnx,  PyBUF_SIMPLE|PyBUF_C_CONTIGUOUS)<0) goto fF;
+    if (PyObject_GetBuffer(onlx, &bnlx, PyBUF_SIMPLE|PyBUF_C_CONTIGUOUS)<0) goto fF;
+    if (PyObject_GetBuffer(ony,  &bny,  PyBUF_SIMPLE|PyBUF_C_CONTIGUOUS)<0) goto fF;
+    if (PyObject_GetBuffer(only, &bnly, PyBUF_SIMPLE|PyBUF_C_CONTIGUOUS)<0) goto fF;
+    fill_F_core(W0,H0,
+        (int32_t*)bgv.buf,(int32_t*)bgi.buf,
+        (int32_t*)bfv.buf,(int8_t*)bft.buf,(int32_t*)bfp.buf,
+        (int32_t*)bnx.buf,(int32_t*)bnlx.buf,mcx,
+        (int32_t*)bny.buf,(int32_t*)bnly.buf,mcy);
+    PyBuffer_Release(&bgv);PyBuffer_Release(&bgi);
+    PyBuffer_Release(&bfv);PyBuffer_Release(&bft);PyBuffer_Release(&bfp);
+    PyBuffer_Release(&bnx);PyBuffer_Release(&bnlx);
+    PyBuffer_Release(&bny);PyBuffer_Release(&bnly);
     Py_RETURN_NONE;
-
-fail_F:
-    PyBuffer_Release(&buf_g_values);
-    PyBuffer_Release(&buf_g_indices);
-    PyBuffer_Release(&buf_F_values);
-    PyBuffer_Release(&buf_F_type);
-    PyBuffer_Release(&buf_F_param);
-    PyBuffer_Release(&buf_np_x_arr);
-    PyBuffer_Release(&buf_np_x_len);
-    PyBuffer_Release(&buf_np_y_arr);
-    PyBuffer_Release(&buf_np_y_len);
+fF:
+    PyBuffer_Release(&bgv);PyBuffer_Release(&bgi);
+    PyBuffer_Release(&bfv);PyBuffer_Release(&bft);PyBuffer_Release(&bfp);
+    PyBuffer_Release(&bnx);PyBuffer_Release(&bnlx);
+    PyBuffer_Release(&bny);PyBuffer_Release(&bnly);
     return NULL;
 }
 
 /* method table */
 static PyMethodDef SolverMethods[] = {
-    {"fill_g",  py_fill_g,  METH_VARARGS, "Precompute best single-item tiling (g tables)."},
-    {"fill_F",  py_fill_F,  METH_VARARGS, "Bottom-up DP for pure rectangles."},
-    {"fill_Fd", py_fill_Fd, METH_VARARGS, "Fill Fd_values for defected rectangles."},
+    {"fill_g",         py_fill_g,         METH_VARARGS, "Precompute g tables."},
+    {"fill_F",         py_fill_F,         METH_VARARGS, "Bottom-up DP for pure rectangles."},
+    {"fill_Fd",        py_fill_Fd,        METH_VARARGS, "Dense Fd fill (legacy)."},
+    {"fill_Fd_slab",   py_fill_Fd_slab,   METH_VARARGS, "Slab-based Fd fill (memory efficient)."},
+    {"fd_slab_lookup", py_fd_slab_lookup, METH_VARARGS, "Lookup Fd value from slab."},
+    {"fd_slab_stats",  py_fd_slab_stats,  METH_VARARGS, "Return (slab_entries, dense_equivalent)."},
     {NULL, NULL, 0, NULL}
 };
 
-/* module definition */
 static struct PyModuleDef solvermodule = {
     PyModuleDef_HEAD_INIT, "_solver", NULL, -1, SolverMethods
 };
 
-/* module init function — called by Python on import */
 PyMODINIT_FUNC PyInit__solver(void) {
     return PyModule_Create(&solvermodule);
 }
