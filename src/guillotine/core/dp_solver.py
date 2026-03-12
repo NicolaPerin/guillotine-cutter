@@ -10,7 +10,7 @@ from guillotine.core.constants import (
 
 
 class GuillotineDP:
-    """Optimized DP solver with slab-based defected-rectangle storage."""
+    """Optimized DP solver with multi-tile slab-based defected-rectangle storage."""
 
     def __init__(self, item_sizes, geometry, patterns):
         self.geom = geometry
@@ -138,7 +138,7 @@ class GuillotineDP:
             return int(self.Fd_values[w, h, x, y])
 
     def _fill_Fd(self):
-        """Fill defected rectangle DP table using slab storage."""
+        """Fill defected rectangle DP table using multi-tile slab storage."""
         try:
             from guillotine.core import _solver
             self._fd_slab = _solver.fill_Fd_slab(
@@ -151,8 +151,9 @@ class GuillotineDP:
                 int(self.patterns.np_y_arr.shape[1]),
                 self.geom.n_def,
             )
-            slab_entries, dense_entries = _solver.fd_slab_stats(self._fd_slab)
-            print(f"Fd slab: {slab_entries:,} entries ({slab_entries * 4 / 1024 / 1024:.1f} MB), "
+            slab_entries, dense_entries, n_tiles = _solver.fd_slab_stats(self._fd_slab)
+            print(f"Fd slab: {slab_entries:,} entries ({slab_entries * 4 / 1024 / 1024:.1f} MB) "
+                  f"in {n_tiles:,} tiles, "
                   f"vs dense {dense_entries:,} ({dense_entries * 4 / 1024 / 1024:.1f} MB), "
                   f"ratio {slab_entries / max(dense_entries, 1) * 100:.2f}%")
             return
