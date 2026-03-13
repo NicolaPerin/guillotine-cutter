@@ -1,0 +1,38 @@
+{
+  "problem": {
+    "sheet_size": [100, 100],
+    "items": [
+      {"id": 0, "width": 3, "height": 7},
+      {"id": 1, "width": 7, "height": 3},
+      {"id": 2, "width": 4, "height": 9},
+      {"id": 3, "width": 9, "height": 4},
+      {"id": 4, "width": 5, "height": 11},
+      {"id": 5, "width": 11, "height": 5},
+      {"id": 6, "width": 6, "height": 13},
+      {"id": 7, "width": 13, "height": 6},
+      {"id": 8, "width": 8, "height": 12},
+      {"id": 9, "width": 12, "height": 8}
+    ],
+    "defects": [
+      {"x": 10, "y": 70, "width": 4, "height": 4},
+      {"x": 15, "y": 70, "width": 4, "height": 4},
+      {"x": 20, "y": 70, "width": 4, "height": 4},
+      {"x": 10, "y": 75, "width": 4, "height": 4},
+      {"x": 15, "y": 75, "width": 4, "height": 4},
+      {"x": 20, "y": 75, "width": 4, "height": 4},
+      {"x": 10, "y": 80, "width": 4, "height": 4},
+      {"x": 15, "y": 80, "width": 4, "height": 4},
+      {"x": 20, "y": 80, "width": 4, "height": 4},
+
+      {"x": 70, "y": 10, "width": 4, "height": 4},
+      {"x": 75, "y": 10, "width": 4, "height": 4},
+      {"x": 80, "y": 10, "width": 4, "height": 4},
+      {"x": 70, "y": 15, "width": 4, "height": 4},
+      {"x": 75, "y": 15, "width": 4, "height": 4},
+      {"x": 80, "y": 15, "width": 4, "height": 4},
+      {"x": 70, "y": 20, "width": 4, "height": 4},
+      {"x": 75, "y": 20, "width": 4, "height": 4},
+      {"x": 80, "y": 20, "width": 4, "height": 4}
+    ]
+  }
+}
