@@ -1,13 +1,13 @@
 """Visualization for guillotine cutting solutions."""
 
 import os
+import math
 import colorsys
 
 import matplotlib
 matplotlib.use('Agg')  # Non-interactive backend for saving files
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-import matplotlib.colors as mcolors
 
 
 # Vibrant primary/secondary palette — ordered for maximum contrast between neighbours
@@ -33,6 +33,55 @@ _VIBRANT_PALETTE = [
     "#FFEA00",  # pure yellow
     "#D500F9",  # neon purple
 ]
+
+
+def _is_leaf(node):
+    """Check if a cutting sequence node is a leaf (no further cuts).
+
+    Leaves are either:
+      - A string like "g_3" (item fill) or "empty"
+      - None or any non-tuple type
+    """
+    return not isinstance(node, tuple)
+
+
+def _select_ticks(all_positions, sheet_dim, max_ticks=20):
+    """Select up to max_ticks cut positions with guaranteed minimum spacing.
+
+    Strategy:
+      1. Always include 0 as the first tick.
+      2. Walk through the sorted cut coordinates; accept a tick only if it
+         is at least `min_gap` units away from the last accepted tick.
+         min_gap = sheet_dim / max_ticks.
+      3. Always include sheet_dim as the final tick (even if it's close to
+         the previous one — the endpoint is too important to skip).
+
+    This prevents label overlap regardless of how the cuts cluster.
+
+    Returns a sorted list of tick positions (ints).
+    """
+    positions = sorted(set(all_positions))
+
+    if len(positions) == 0:
+        return [0, sheet_dim]
+
+    min_gap = sheet_dim / max_ticks
+
+    # Always start with 0
+    selected = [0]
+    last_accepted = 0
+
+    for pos in positions:
+        if pos <= 0 or pos >= sheet_dim:
+            continue
+        if pos - last_accepted >= min_gap:
+            selected.append(pos)
+            last_accepted = pos
+
+    # Always end with sheet_dim
+    selected.append(sheet_dim)
+
+    return selected
 
 
 class CuttingVisualizer:
@@ -78,8 +127,16 @@ class CuttingVisualizer:
                 )
                 ax.add_patch(rect)
 
-    def _draw_cuts(self, ax, sequence, w, h, colors, lw, depth, offset=(0, 0)):
-        """Recursively draw cutting sequence."""
+    def _draw_cuts(self, ax, sequence, w, h, colors, lw, offset=(0, 0)):
+        """Recursively draw cutting sequence.
+
+        Cut lines use exactly two thickness levels:
+          - Structural cuts (at least one child has further cuts): thick
+          - Terminal cuts (both children are leaves / item fills): thin
+
+        This makes it visually clear which cuts subdivide the sheet
+        versus which cuts separate final item placements.
+        """
         ox, oy = offset
 
         if isinstance(sequence, str):
@@ -91,33 +148,59 @@ class CuttingVisualizer:
             return
 
         direction, z, left, right = sequence
-        # Cut lines thin out at deeper recursion levels
-        cut_lw = max(lw * (0.75 ** depth), 0.15)
+
+        # Two-level thickness: thin if both children are leaves, thick otherwise
+        is_terminal = _is_leaf(left) and _is_leaf(right)
+        cut_lw = lw * 0.4 if is_terminal else lw
 
         if direction == 'X':
             ax.plot([ox + z, ox + z], [oy, oy + h], color='#111111', linewidth=cut_lw)
             self.xticks.append(ox + z)
-            self._draw_cuts(ax, left,  z,     h, colors, lw, depth + 1, (ox,     oy))
-            self._draw_cuts(ax, right, w - z, h, colors, lw, depth + 1, (ox + z, oy))
+            self._draw_cuts(ax, left,  z,     h, colors, lw, (ox,     oy))
+            self._draw_cuts(ax, right, w - z, h, colors, lw, (ox + z, oy))
         else:
             ax.plot([ox, ox + w], [oy + z, oy + z], color='#111111', linewidth=cut_lw)
             self.yticks.append(oy + z)
-            self._draw_cuts(ax, left,  w, z,     colors, lw, depth + 1, (ox, oy))
-            self._draw_cuts(ax, right, w, h - z, colors, lw, depth + 1, (ox, oy + z))
+            self._draw_cuts(ax, left,  w, z,     colors, lw, (ox, oy))
+            self._draw_cuts(ax, right, w, h - z, colors, lw, (ox, oy + z))
 
     def plot(self, sequence, output_file):
         """Plot cutting pattern and save as both SVG and PNG."""
         W0, H0 = self.sheet_size
 
         FIG_W = 12  # inches
-        fig, ax = plt.subplots(figsize=(FIG_W, FIG_W * H0 / W0))
+        fig_h = FIG_W * H0 / W0
+        fig, ax = plt.subplots(figsize=(FIG_W, fig_h))
         ax.set_xlim(0, W0)
         ax.set_ylim(0, H0)
         ax.set_aspect('equal')
 
-        # Scale line width so it looks consistent regardless of sheet dimensions
-        pts_per_unit = FIG_W * 72 / W0
-        base_lw = max(pts_per_unit * 0.55, 0.2)
+        # Line width scaling via power law.
+        #
+        # ppu (points per unit) measures how many typographic points one
+        # sheet-unit occupies on screen. We use the geometric mean of the
+        # figure's width and height (in inches) to handle rectangular sheets
+        # fairly — neither axis dominates.
+        #
+        # A power law base_lw = 0.40 * ppu^0.75 was calibrated against:
+        #   40×40   → ~4.0 pt   (small sheet, thick lines)
+        #   100×100 → ~2.0 pt   (reference)
+        #   150×150 → ~1.5 pt
+        #   300×150 → ~0.7 pt
+        #   300×300 → ~0.9 pt
+        #   450×200 → ~0.5 pt   (large sheet, thin lines)
+        #
+        # The exponent 0.75 makes lines thin out faster than linear (1.0)
+        # but slower than sqrt (0.5), which matches visual expectations:
+        # larger sheets have more cuts, so lines must shrink to avoid clutter.
+        geo_fig_dim = math.sqrt(FIG_W * fig_h)
+        ppu = geo_fig_dim * 72 / max(W0, H0)
+        base_lw = max(0.40 * ppu ** 0.75, 0.2)
+
+        # Font size: scale with the shorter figure dimension so labels
+        # never look oversized on rectangular sheets. Clamp to [7, 12].
+        min_fig_dim = min(FIG_W, fig_h)
+        tick_font = max(7, min(12, min_fig_dim * 1.5))
 
         # Sheet background
         ax.add_patch(plt.Rectangle(
@@ -138,30 +221,16 @@ class CuttingVisualizer:
         colors = self._get_colors()
         self.xticks.clear()
         self.yticks.clear()
-        self._draw_cuts(ax, sequence, W0, H0, colors, base_lw, depth=0)
+        self._draw_cuts(ax, sequence, W0, H0, colors, base_lw)
 
-        # Ticks: marks at every cut, labels sparsely
-        all_xticks = sorted(set([0] + self.xticks + [W0]))
-        all_yticks = sorted(set([0] + self.yticks + [H0]))
+        # Select ticks with guaranteed minimum spacing to prevent overlap
+        selected_xticks = _select_ticks(self.xticks, W0, max_ticks=20)
+        selected_yticks = _select_ticks(self.yticks, H0, max_ticks=20)
 
-        def _label_step(positions, target=12):
-            span = positions[-1] - positions[0] if len(positions) > 1 else 1
-            raw = max(1, span // target)
-            for nice in [1, 2, 5, 10, 20, 25, 50, 100, 200]:
-                if nice >= raw:
-                    return nice
-            return raw
-
-        x_step = _label_step(all_xticks)
-        y_step = _label_step(all_yticks)
-        ax.set_xticks(all_xticks)
-        ax.set_yticks(all_yticks)
-        ax.set_xticklabels(
-            [str(t) if t % x_step == 0 else '' for t in all_xticks], fontsize=7
-        )
-        ax.set_yticklabels(
-            [str(t) if t % y_step == 0 else '' for t in all_yticks], fontsize=7
-        )
+        ax.set_xticks(selected_xticks)
+        ax.set_yticks(selected_yticks)
+        ax.set_xticklabels([str(t) for t in selected_xticks], fontsize=tick_font)
+        ax.set_yticklabels([str(t) for t in selected_yticks], fontsize=tick_font)
         ax.tick_params(axis='both', which='major', length=3, width=0.5)
 
         plt.tight_layout(pad=0.3)
