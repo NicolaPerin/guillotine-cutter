@@ -4,13 +4,13 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/**",
-                "/usr/include/python3.12",
-                "/home/nicola/guillotine-cutter/.venv/lib/python3.12/site-packages/numpy/core/include"
+                "/usr/include/python3.12"
             ],
             "defines": [],
-            "compilerPath": "/usr/bin/gcc",
-            "cStandard": "c11",
-            "intelliSenseMode": "linux-gcc-x64"
+            "compilerPath": "/usr/bin/clang",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-clang-x64"
         }
     ],
     "version": 4
