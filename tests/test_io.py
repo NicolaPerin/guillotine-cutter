@@ -78,8 +78,10 @@ def test_save_solution_json(tmp_path):
         str(filepath),
         value,
         sequence,
-        sheet_size,
-        defect_area
+        item_sizes=[[5, 10], [5, 10]],
+        defect_sizes=[[2], [2]],
+        defect_positions=[[9], [9]],
+        sheet_size=sheet_size,
     )
     
     # File should exist
@@ -136,7 +138,11 @@ def test_save_solution_with_simple_sequences(tmp_path):
     filepath = tmp_path / "solution_empty.json"
     
     # Test with "empty" sequence
-    save_solution_json(str(filepath), 0, "empty", (10, 10), 0)
+    save_solution_json(str(filepath), 0, "empty",
+                   item_sizes=[[5], [5]],
+                   defect_sizes=[[], []],
+                   defect_positions=[[], []],
+                   sheet_size=(10, 10))
     
     with open(filepath) as f:
         data = json.load(f)
@@ -145,7 +151,11 @@ def test_save_solution_with_simple_sequences(tmp_path):
     
     # Test with "defect" sequence
     filepath2 = tmp_path / "solution_defect.json"
-    save_solution_json(str(filepath2), 0, "defect", (10, 10), 100)
+    save_solution_json(str(filepath2), 0, "defect",
+                   item_sizes=[[5], [5]],
+                   defect_sizes=[[], []],
+                   defect_positions=[[], []],
+                   sheet_size=(10, 10))
     
     with open(filepath2) as f:
         data = json.load(f)
