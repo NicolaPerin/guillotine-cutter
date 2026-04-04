@@ -8,7 +8,7 @@ import pstats
 from guillotine.core.geometry import SheetGeometry
 from guillotine.core.patterns import CutPatternGenerator
 from guillotine.core.dp_solver import GuillotineDP
-from guillotine.io import save_solution_json, load_problem_json, validate_problem
+from guillotine.io import save_solution_json, load_problem_json, load_solution_json, validate_problem
 
 
 def ensure_output_path(filepath):
@@ -187,19 +187,18 @@ def run_solver(item_sizes, defect_sizes, defect_positions, sheet_size,
     else:
         value, sequence, solve_time = solve()
     
-    defect_area = sum(defect_sizes[0][i] * defect_sizes[1][i] 
-                     for i in range(len(defect_sizes[0])))
-    
     output_file = ensure_output_path(output_file)
-    save_solution_json(output_file, value, sequence, sheet_size, defect_area)
-    
+    save_solution_json(output_file, value, sequence,
+                       item_sizes, defect_sizes, defect_positions, sheet_size)
+
+    print(f"Solved in {solve_time:.3f}s")
+    print(f"Value: {value}/{sheet_size[0]*sheet_size[1]} "
+          f"({value/(sheet_size[0]*sheet_size[1])*100:.1f}%)")
+    print(f"Output saved to: {output_file}")
+
     if plot_file:
-        from guillotine.visualize import CuttingVisualizer
-        print(f"Generating visualization: {plot_file}")
-        viz = CuttingVisualizer(item_sizes, defect_sizes, defect_positions, sheet_size)
         plot_file = ensure_output_path(plot_file)
-        viz.plot(sequence, plot_file)
-        print(f"Plot saved to: {plot_file}")
+        run_plot(output_file, plot_file)
     
     print(f"Solved in {solve_time:.3f}s")
     print(f"Value: {value}/{sheet_size[0]*sheet_size[1]} "
@@ -231,6 +230,29 @@ def run_from_json(input_file, output_file, profile_file=None, plot_file=None):
         plot_file
     )
 
+def run_plot(solution_file, output_file):
+    """Generate visualization from an existing solution file."""
+    from guillotine.visualize import CuttingVisualizer
+
+    print(f"Loading solution from {solution_file}...")
+    data = load_solution_json(solution_file)
+
+    W0, H0 = data["sheet_size"]
+    value = data["cut_area"]
+    total_area = W0 * H0
+
+    viz = CuttingVisualizer(
+        data["item_sizes"],
+        data["defect_sizes"],
+        data["defect_positions"],
+        data["sheet_size"]
+    )
+
+    output_file = ensure_output_path(output_file)
+    viz.plot(data["sequence"], output_file)
+
+    print(f"Value: {value}/{total_area} ({value/total_area*100:.1f}%)")
+    print(f"Plot saved to: {output_file}")
 
 # -------------------------
 # Main entry point
