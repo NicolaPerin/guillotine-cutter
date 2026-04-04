@@ -8,7 +8,9 @@ import pstats
 from guillotine.core.geometry import SheetGeometry
 from guillotine.core.patterns import CutPatternGenerator
 from guillotine.core.dp_solver import GuillotineDP
-from guillotine.io import save_solution_json, load_problem_json, load_solution_json, validate_problem
+from guillotine.io import (
+    save_solution_json, load_problem_json, load_solution_json, validate_problem
+)
 
 
 def ensure_output_path(filepath):
@@ -379,6 +381,7 @@ def run_from_json(input_file, output_file, profile_file=None, plot_file=None):
         profile_file,
         plot_file
     )
+
 
 def run_plot(solution_file, output_file):
     """Generate visualization from an existing solution file.
