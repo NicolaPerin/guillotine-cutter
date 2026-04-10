@@ -9,7 +9,7 @@
 #include "solver_core.h"
 #include <stdlib.h>
 #include <string.h>
-
+#include <stdio.h>
 
 /* =============================================================================
  * PositionInterval — scratch struct used while building tiles for one (w, h).
@@ -42,6 +42,11 @@ static int compare_defects_by_x(const void *a, const void *b) {
  * After sorting, we can merge overlapping intervals in a single left-to-right pass. */
 static int compare_intervals_by_x_lo(const void *a, const void *b) {
     return ((const PositionInterval *)a)->x_lo - ((const PositionInterval *)b)->x_lo;
+}
+
+/* Same for y */
+static int compare_intervals_by_y_lo(const void *a, const void *b) {
+    return ((const PositionInterval *)a)->y_lo - ((const PositionInterval *)b)->y_lo;
 }
 
 
@@ -204,16 +209,29 @@ void fill_F_table(int sheet_width, int sheet_height,
  *
  * Returns the number of tiles written to out_tiles[].
  * ============================================================================= */
+/* =============================================================================
+ * Merge strategy selector
+ * ============================================================================= */
+typedef enum {
+    MERGE_1D_X,   /* original: merge if x-ranges overlap/adjacent, union y */
+    MERGE_1D_Y,   /* symmetric: merge if y-ranges overlap/adjacent, union x */
+    MERGE_2D,     /* merge only if both x and y genuinely overlap            */
+} MergeStrategy;
+
+
+/* =============================================================================
+ * Tile builder — now parameterised by MergeStrategy
+ * ============================================================================= */
 static int build_tiles_for_rect_size(int rect_width, int rect_height,
                                      int sheet_width, int sheet_height,
                                      const int32_t *defect_array, int n_defects,
                                      PositionInterval *scratch_intervals,
-                                     Tile *out_tiles) {
+                                     Tile *out_tiles,
+                                     MergeStrategy strategy) {
 
     int max_x_pos = sheet_width  - rect_width;
     int max_y_pos = sheet_height - rect_height;
 
-    /* Compute the affected (x, y) interval for each defect. */
     int n_intervals = 0;
     for (int d = 0; d < n_defects; d++) {
         DefectRef def = defect_at(defect_array, d);
@@ -223,7 +241,6 @@ static int build_tiles_for_rect_size(int rect_width, int rect_height,
         int y_lo = defect_y_start(def) - rect_height + 1;
         int y_hi = defect_y_end(def)   - 1;
 
-        /* Clamp to valid sheet positions. */
         if (x_lo < 0)         x_lo = 0;
         if (x_hi > max_x_pos) x_hi = max_x_pos;
         if (y_lo < 0)         y_lo = 0;
@@ -240,44 +257,119 @@ static int build_tiles_for_rect_size(int rect_width, int rect_height,
 
     if (n_intervals == 0) return 0;
 
-    /* Sort by x_lo for the sweep-line merge. */
-    qsort(scratch_intervals, n_intervals, sizeof(PositionInterval), compare_intervals_by_x_lo);
+    if (strategy == MERGE_1D_X || strategy == MERGE_1D_Y) {
 
-    /* Sweep left-to-right, merging overlapping or adjacent x-ranges. */
-    int n_tiles = 0;
-    PositionInterval current = scratch_intervals[0];
+        /* Sort by the primary sweep axis. */
+        if (strategy == MERGE_1D_X)
+            qsort(scratch_intervals, n_intervals, sizeof(PositionInterval),
+                  compare_intervals_by_x_lo);
+        else
+            qsort(scratch_intervals, n_intervals, sizeof(PositionInterval),
+                  compare_intervals_by_y_lo);
 
-    for (int i = 1; i < n_intervals; i++) {
-        PositionInterval *next = &scratch_intervals[i];
+        int n_tiles = 0;
+        PositionInterval current = scratch_intervals[0];
 
-        if (next->x_lo <= current.x_hi + 1) {
-            /* Overlapping or adjacent in x — extend the current group,
-             * and take the union of the y-ranges. */
-            if (next->x_hi > current.x_hi) current.x_hi = next->x_hi;
-            if (next->y_lo < current.y_lo) current.y_lo = next->y_lo;
-            if (next->y_hi > current.y_hi) current.y_hi = next->y_hi;
-        } else {
-            /* Gap in x — emit current tile and start a new group. */
-            out_tiles[n_tiles].sheet_x_lo = current.x_lo;
-            out_tiles[n_tiles].sheet_x_hi = current.x_hi;
-            out_tiles[n_tiles].sheet_y_lo = current.y_lo;
-            out_tiles[n_tiles].sheet_y_hi = current.y_hi;
-            out_tiles[n_tiles].x_span = current.x_hi - current.x_lo + 1;
-            out_tiles[n_tiles].y_span = current.y_hi - current.y_lo + 1;
-            n_tiles++;
-            current = *next;
+        for (int i = 1; i < n_intervals; i++) {
+            PositionInterval *next = &scratch_intervals[i];
+
+            int primary_merge = (strategy == MERGE_1D_X)
+                ? (next->x_lo <= current.x_hi + 1)
+                : (next->y_lo <= current.y_hi + 1);
+
+            if (primary_merge) {
+                if (next->x_hi > current.x_hi) current.x_hi = next->x_hi;
+                if (next->y_hi > current.y_hi) current.y_hi = next->y_hi;
+                if (next->x_lo < current.x_lo) current.x_lo = next->x_lo;
+                if (next->y_lo < current.y_lo) current.y_lo = next->y_lo;
+            } else {
+                out_tiles[n_tiles].sheet_x_lo = current.x_lo;
+                out_tiles[n_tiles].sheet_x_hi = current.x_hi;
+                out_tiles[n_tiles].sheet_y_lo = current.y_lo;
+                out_tiles[n_tiles].sheet_y_hi = current.y_hi;
+                out_tiles[n_tiles].x_span = current.x_hi - current.x_lo + 1;
+                out_tiles[n_tiles].y_span = current.y_hi - current.y_lo + 1;
+                n_tiles++;
+                current = *next;
+            }
+        }
+        out_tiles[n_tiles].sheet_x_lo = current.x_lo;
+        out_tiles[n_tiles].sheet_x_hi = current.x_hi;
+        out_tiles[n_tiles].sheet_y_lo = current.y_lo;
+        out_tiles[n_tiles].sheet_y_hi = current.y_hi;
+        out_tiles[n_tiles].x_span = current.x_hi - current.x_lo + 1;
+        out_tiles[n_tiles].y_span = current.y_hi - current.y_lo + 1;
+        return n_tiles + 1;
+
+    } else {  /* MERGE_2D */
+
+        /* Pairwise merge: only merge if both x and y genuinely overlap.
+         * Repeated until stable. */
+        int changed = 1;
+        while (changed) {
+            changed = 0;
+            for (int i = 0; i < n_intervals && !changed; i++) {
+                for (int j = i + 1; j < n_intervals && !changed; j++) {
+                    int x_overlap = (scratch_intervals[i].x_lo <= scratch_intervals[j].x_hi) &&
+                                    (scratch_intervals[j].x_lo <= scratch_intervals[i].x_hi);
+                    int y_overlap = (scratch_intervals[i].y_lo <= scratch_intervals[j].y_hi) &&
+                                    (scratch_intervals[j].y_lo <= scratch_intervals[i].y_hi);
+                    if (x_overlap && y_overlap) {
+                        if (scratch_intervals[j].x_lo < scratch_intervals[i].x_lo)
+                            scratch_intervals[i].x_lo = scratch_intervals[j].x_lo;
+                        if (scratch_intervals[j].x_hi > scratch_intervals[i].x_hi)
+                            scratch_intervals[i].x_hi = scratch_intervals[j].x_hi;
+                        if (scratch_intervals[j].y_lo < scratch_intervals[i].y_lo)
+                            scratch_intervals[i].y_lo = scratch_intervals[j].y_lo;
+                        if (scratch_intervals[j].y_hi > scratch_intervals[i].y_hi)
+                            scratch_intervals[i].y_hi = scratch_intervals[j].y_hi;
+                        scratch_intervals[j] = scratch_intervals[--n_intervals];
+                        changed = 1;
+                    }
+                }
+            }
+        }
+
+        for (int t = 0; t < n_intervals; t++) {
+            out_tiles[t].sheet_x_lo = scratch_intervals[t].x_lo;
+            out_tiles[t].sheet_x_hi = scratch_intervals[t].x_hi;
+            out_tiles[t].sheet_y_lo = scratch_intervals[t].y_lo;
+            out_tiles[t].sheet_y_hi = scratch_intervals[t].y_hi;
+            out_tiles[t].x_span     = scratch_intervals[t].x_hi - scratch_intervals[t].x_lo + 1;
+            out_tiles[t].y_span     = scratch_intervals[t].y_hi - scratch_intervals[t].y_lo + 1;
+        }
+        return n_intervals;
+    }
+}
+
+
+/* =============================================================================
+ * Strategy evaluator — dry run for one strategy, returns tiles and data count
+ * ============================================================================= */
+static void evaluate_strategy(int sheet_width, int sheet_height,
+                               const int32_t *defects, int n_defects,
+                               PositionInterval *interval_scratch,
+                               Tile *tile_scratch,
+                               MergeStrategy strategy,
+                               int *out_total_tiles,
+                               int64_t *out_total_data) {
+    int     total_tiles = 0;
+    int64_t total_data  = 0;
+
+    for (int w = 1; w <= sheet_width; w++) {
+        for (int h = 1; h <= sheet_height; h++) {
+            int n = build_tiles_for_rect_size(w, h, sheet_width, sheet_height,
+                                              defects, n_defects,
+                                              interval_scratch, tile_scratch,
+                                              strategy);
+            total_tiles += n;
+            for (int t = 0; t < n; t++)
+                total_data += (int64_t)tile_scratch[t].x_span * tile_scratch[t].y_span;
         }
     }
 
-    /* Emit the last group. */
-    out_tiles[n_tiles].sheet_x_lo = current.x_lo;
-    out_tiles[n_tiles].sheet_x_hi = current.x_hi;
-    out_tiles[n_tiles].sheet_y_lo = current.y_lo;
-    out_tiles[n_tiles].sheet_y_hi = current.y_hi;
-    out_tiles[n_tiles].x_span = current.x_hi - current.x_lo + 1;
-    out_tiles[n_tiles].y_span = current.y_hi - current.y_lo + 1;
-
-    return n_tiles + 1;
+    *out_total_tiles = total_tiles;
+    *out_total_data  = total_data;
 }
 
 
@@ -342,13 +434,58 @@ FdSlab *fill_Fd_slab(int sheet_width, int sheet_height,
     PositionInterval *interval_scratch = (PositionInterval *)malloc(n_defects * sizeof(PositionInterval));
     Tile             *tile_scratch     = (Tile *)malloc(n_defects * sizeof(Tile));
 
-    /* --- Phase B: count total tiles (dry run) --- */
-    int total_tiles = 0;
-    for (int w = 1; w <= sheet_width; w++)
-        for (int h = 1; h <= sheet_height; h++)
-            total_tiles += build_tiles_for_rect_size(w, h, sheet_width, sheet_height,
-                                                     defects, n_defects,
-                                                     interval_scratch, tile_scratch);
+    /* --- Phase B: evaluate all strategies, pick best by tile count --- */
+    const char *strategy_names[] = {"1D-x", "1D-y", "2D"};
+    MergeStrategy strategies[]   = {MERGE_1D_X, MERGE_1D_Y, MERGE_2D};
+    int     strat_tiles[3];
+    int64_t strat_data [3];
+
+    for (int s = 0; s < 3; s++)
+        evaluate_strategy(sheet_width, sheet_height, defects, n_defects,
+                          interval_scratch, tile_scratch, strategies[s],
+                          &strat_tiles[s], &strat_data[s]);
+
+    fprintf(stderr, "Tile strategy comparison:\n");
+    for (int s = 0; s < 3; s++)
+        fprintf(stderr, "  %-4s  tiles=%d  data=%lld  (%.1f MB)\n",
+                strategy_names[s],
+                strat_tiles[s],
+                (long long)strat_data[s],
+                strat_data[s] * 4.0 / 1024.0 / 1024.0);
+
+    /* Pick best strategy.
+     *
+     * Primary criterion: fewest tiles (drives slab_lookup cost).
+     * Constraint: data must not exceed min_data * memory_tolerance.
+     * This prevents picking a strategy that saves a few tiles at the
+     * cost of a large memory blowup (e.g. sides problem: 1D-y has
+     * fewest tiles but 3.4x more memory than 1D-x).
+     */
+    int64_t min_data = strat_data[0];
+    for (int s = 1; s < 3; s++)
+        if (strat_data[s] < min_data) min_data = strat_data[s];
+
+    const double memory_tolerance = 1.20;  /* allow up to 20% above minimum */
+
+    int best = -1;
+    for (int s = 0; s < 3; s++) {
+        if (strat_data[s] > (int64_t)(min_data * memory_tolerance))
+            continue;  /* disqualify: too much memory */
+        if (best == -1 || strat_tiles[s] < strat_tiles[best])
+            best = s;
+    }
+    /* fallback: if all strategies exceed tolerance (shouldn't happen),
+     * just pick minimum memory */
+    if (best == -1) {
+        best = 0;
+        for (int s = 1; s < 3; s++)
+            if (strat_data[s] < strat_data[best]) best = s;
+    }
+
+    fprintf(stderr, "  -> selected: %s\n", strategy_names[best]);
+    MergeStrategy chosen = strategies[best];
+
+    int total_tiles = strat_tiles[best];
 
     /* --- Phase C: allocate tiles, assign offsets, build local defect lists ---
      *
@@ -370,7 +507,8 @@ FdSlab *fill_Fd_slab(int sheet_width, int sheet_height,
 
             int n_tiles = build_tiles_for_rect_size(w, h, sheet_width, sheet_height,
                                                     defects, n_defects,
-                                                    interval_scratch, tile_scratch);
+                                                    interval_scratch, tile_scratch,
+                                                    chosen);
 
             for (int t = 0; t < n_tiles; t++) {
                 tile_scratch[t].data_offset = data_total;
