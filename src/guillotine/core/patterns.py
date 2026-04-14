@@ -4,29 +4,29 @@ import numpy as np
 
 
 def compute_normal_patterns(item_sizes, max_L):
-    """Compute reachable cut positions using DP."""
+    """Compute reachable cut positions using DP.
+    
+    Maintained for backward compatibility with unit tests.
+    """
+    reachable = _compute_reachability_array(item_sizes, max_L)
+    patterns = {}
+    for L in range(max_L + 1):
+        patterns[L] = [z for z in range(1, L) if reachable[z]]
+    return patterns
+
+def _compute_reachability_array(item_sizes, max_L):
+    """Compute boolean reachability array for item size sums."""
     sizes = sorted(set(int(s) for s in item_sizes if s > 0))
     reachable = [False] * (max_L + 1)
     reachable[0] = True
-    
     for size in sizes:
         for z in range(size, max_L + 1):
             if reachable[z - size]:
                 reachable[z] = True
-    
-    patterns = {}
-    for L in range(max_L + 1):
-        patterns[L] = [z for z in range(1, L) if reachable[z]]
-    
-    return patterns
+    return reachable
 
 def compute_normal_patterns_arrays(patterns_dict, max_L):
-    """Convert normal patterns dict to numpy arrays for C interop.
-    
-    Returns:
-        arr: 2D int32 array, shape (max_L+1, max_L), arr[w, i] = i-th cut for width w
-        lengths: 1D int32 array, shape (max_L+1,), lengths[w] = number of cuts for width w
-    """
+    """Convert normal patterns dict to numpy arrays for C interop."""
     lengths = np.zeros(max_L + 1, dtype=np.int32)
     for L in range(max_L + 1):
         lengths[L] = len(patterns_dict.get(L, []))
@@ -49,118 +49,43 @@ class CutPatternGenerator:
         self.geom = geometry
         self.W0, self.H0 = geometry.W0, geometry.H0
         
-        # Precompute normal patterns for both directions
+        # 1. Precompute normal patterns (dict for Python reconstruction)
         self.np_x = compute_normal_patterns(item_sizes[0], self.W0)
         self.np_y = compute_normal_patterns(item_sizes[1], self.H0)
 
+        # 2. Precompute reachability (arrays for "Extended" pattern logic)
+        self.reachable_x = _compute_reachability_array(item_sizes[0], self.W0)
+        self.reachable_y = _compute_reachability_array(item_sizes[1], self.H0)
+
+        # 3. Precompute arrays for C interop
         self.np_x_arr, self.np_x_len = compute_normal_patterns_arrays(self.np_x, self.W0)
         self.np_y_arr, self.np_y_len = compute_normal_patterns_arrays(self.np_y, self.H0)
         
-        # Pre-allocate scratch buffers (reused to avoid allocations)
+        # Pre-allocate scratch buffers
         self._x_mask = [False] * (self.W0 + 1)
         self._y_mask = [False] * (self.H0 + 1)
         self._x_buf = [0] * (self.W0 + 1)
         self._y_buf = [0] * (self.H0 + 1)
     
     def cuts_pure_x(self, w):
-        """Get valid X cuts for pure rectangle of width w."""
         return self.np_x.get(w, [])
     
     def cuts_pure_y(self, h):
-        """Get valid Y cuts for pure rectangle of height h."""
         return self.np_y.get(h, [])
     
     def _clear_masks(self, w, h):
-        """Clear scratch masks for new computation."""
-        for i in range(1, w):
+        for i in range(1, w + 1):
             self._x_mask[i] = False
-        for i in range(1, h):
+        for i in range(1, h + 1):
             self._y_mask[i] = False
 
-    def _add_normal_cuts(self, w, h):
-        """Add normal pattern cuts to masks."""
-        for z in self.np_x.get(w, []):
-            self._x_mask[z] = True
-        for z in self.np_y.get(h, []):
-            self._y_mask[z] = True
-
-    def _add_defect_cuts(self, x, y, w, h):
-        """Add cuts at defect boundaries to masks.
-        
-        Geometric idea: To isolate a defect, we need to cut at its edges.
-        
-        Example:
-            Rectangle (x=0, y=0, w=20, h=20) with defect at (10,10) size 5x5
-            
-            We add cuts at:
-            - x=10 (left edge of defect)
-            - x=15 (right edge of defect, 10+5)
-            - y=10 (bottom edge)
-            - y=15 (top edge)
-            
-            This isolates the defect so we can discard it and use clear pieces.
-        """
-        x_end = x + w
-        y_end = y + h
-        
-        for (dx, dy, _, _, dx_end, dy_end) in self.geom.defects:
-            # Check if defect overlaps this rectangle
-            if x >= dx_end or y >= dy_end or dx >= x_end or dy >= y_end:
-                continue
-            
-            # X direction: add cuts at left and right edges of defect
-            if w > 1:
-                left = dx - x      # Distance from rect origin to defect left edge
-                right = dx_end - x  # Distance from rect origin to defect right edge
-                
-                if 0 < left < w:
-                    self._x_mask[left] = True
-                if 0 < right < w:
-                    self._x_mask[right] = True
-            
-            # Y direction: add cuts at bottom and top edges of defect
-            if h > 1:
-                bot = dy - y        # Distance from rect origin to defect bottom edge
-                top = dy_end - y    # Distance from rect origin to defect top edge
-                
-                if 0 < bot < h:
-                    self._y_mask[bot] = True
-                if 0 < top < h:
-                    self._y_mask[top] = True
-
     def _compact_masks(self, w, h):
-        """Convert boolean masks to compact lists.
-        
-        The masks (_x_mask, _y_mask) are sparse boolean arrays where True
-        indicates a valid cut position. This method:
-        
-        1. Scans through the masks
-        2. Collects positions where mask[i] == True
-        3. Packs them densely into output buffers
-        4. Returns sliced views (avoids copying)
-        
-        Example:
-            _x_mask = [False, False, True, False, True, False, ...]
-                                     ^             ^
-                                    pos 2         pos 4
-            
-            Compacts to: _x_buf = [2, 4, ...]
-            Returns: [2, 4]
-        
-        Why not just use list comprehension?
-            [i for i in range(1, w) if self._x_mask[i]]
-        
-        Answer: Performance! This method is called millions of times during DP.
-        Reusing preallocated buffers is much faster than creating new lists.
-        """
-        # X cuts
         nx = 0
         for i in range(1, w):
             if self._x_mask[i]:
                 self._x_buf[nx] = i
                 nx += 1
         
-        # Y cuts
         ny = 0
         for i in range(1, h):
             if self._y_mask[i]:
@@ -172,16 +97,42 @@ class CutPatternGenerator:
     def cuts_defected(self, x, y, w, h):
         """Generate candidate cut positions for defected rectangle.
         
-        This method:
-        1. Starts with normal pattern cuts (like pure rectangles)
-        2. Adds cuts at defect boundaries to isolate defects
-        3. Uses boolean masks for efficient computation
-        4. Returns two lists: (x_cuts, y_cuts)
+        Uses Extended Normal Patterns (Zhang et al. 2023):
+        Cuts are considered at (Defect Edge + Normal Pattern increment).
         """
         if w <= 1 and h <= 1:
             return [], []
         
         self._clear_masks(w, h)
-        self._add_normal_cuts(w, h)
-        self._add_defect_cuts(x, y, w, h)
+        
+        # 1. Base relative points: start of rect (0) and relative edges of overlapping defects
+        rp_x = {0}
+        rp_y = {0}
+        for d in self.geom.defects:
+            dx, dy, dw, dh, dx_end, dy_end = d
+            if dx_end > x and dx < x + w and dy_end > y and dy < y + h:
+                rp_x.update([max(0, dx - x), min(w, dx_end - x)])
+                rp_y.update([max(0, dy - y), min(h, dy_end - y)])
+
+        # 2. Minkowski Sum: Reference Points + Normal Patterns
+        # We optimize this by using the pre-computed np_x lists
+        for px in rp_x:
+            # px itself (px + 0)
+            if 0 < px < w:
+                self._x_mask[px] = True
+            
+            # px + reachable normal pattern nx
+            # The list self.np_x[w - px] contains all nx such that 0 < nx < w - px
+            for nx in self.np_x[w - px]:
+                self._x_mask[px + nx] = True
+
+        for py in rp_y:
+            # py itself
+            if 0 < py < h:
+                self._y_mask[py] = True
+            
+            # py + reachable normal pattern ny
+            for ny in self.np_y[h - py]:
+                self._y_mask[py + ny] = True
+
         return self._compact_masks(w, h)

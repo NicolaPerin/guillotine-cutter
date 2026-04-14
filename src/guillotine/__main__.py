@@ -76,45 +76,65 @@ def parse_defects_cli(defects_list):
     return [widths, heights], [xs, ys]
 
 
-def estimate_memory(sheet_size, n_defects):
-    """Estimate memory usage for the solver.
-
-    Returns a dict with estimated byte counts for each major allocation:
-      - f_tables:  F_values + F_type + F_param (2D, always allocated)
-      - fd_dense:  Fd_values as dense 4D array (if no slab)
-      - prefix:    2D prefix sum array
-      - total:     sum of all
-
-    The Fd table dominates memory. With the current dense approach,
-    Fd_values is (W0+1)^2 * (H0+1)^2 * 4 bytes (int32).
-    """
+def estimate_memory(sheet_size, defect_sizes, defect_positions):
     W0, H0 = sheet_size
-
-    # 2D tables: F_values (int32), F_type (int8), F_param (int32)
     cells_2d = (W0 + 1) * (H0 + 1)
     f_tables = cells_2d * (4 + 1 + 4)
-
-    # g tables: g_values (int32), g_indices (int32)
     g_tables = cells_2d * (4 + 4)
+    prefix   = cells_2d * 4
 
-    # Prefix sum: (W0+1) * (H0+1) * int32
-    prefix = cells_2d * 4
-
-    # Fd dense 4D: (W0+1)^2 * (H0+1)^2 * int32
-    cells_4d = (W0 + 1) ** 2 * (H0 + 1) ** 2
-    fd_dense = cells_4d * 4
-
-    total = f_tables + g_tables + prefix + fd_dense
-
-    return {
+    result = {
         "f_tables": f_tables,
         "g_tables": g_tables,
-        "prefix": prefix,
-        "fd_dense": fd_dense,
-        "fd_cells": cells_4d,
-        "total": total,
-        "has_defects": n_defects > 0,
+        "prefix":   prefix,
+        "has_defects": len(defect_sizes[0]) > 0,
     }
+
+    n_defects = len(defect_sizes[0])
+    if n_defects > 0:
+        try:
+            from guillotine.core import _solver
+            from guillotine.core.geometry import SheetGeometry
+            # build defects_arr the same way geometry does
+            geom = SheetGeometry(sheet_size, defect_sizes, defect_positions)
+            t1dx, d1dx, t1dy, d1dy, t2d, d2d = _solver.estimate_slab(
+                W0, H0, geom.defects_arr, n_defects)
+
+            # apply same selection logic as the C solver
+            min_data = min(d1dx, d1dy, d2d)
+            tolerance = 1.20
+            candidates = [
+                ("1D-x", t1dx, d1dx),
+                ("1D-y", t1dy, d1dy),
+                ("2D",   t2d,  d2d),
+            ]
+            qualified = [(n,t,d) for n,t,d in candidates
+                         if d <= min_data * tolerance]
+            if not qualified:
+                qualified = candidates
+            best_name, best_tiles, best_data = min(qualified, key=lambda x: x[1])
+
+            result["slab_strategies"] = candidates
+            result["slab_selected"]   = best_name
+            result["slab_tiles"]      = best_tiles
+            result["slab_data"]       = best_data
+            result["slab_mb"]         = best_data * 4 / 1024**2
+            result["dense_cells"]     = (W0+1)**2 * (H0+1)**2
+            result["dense_mb"]        = (W0+1)**2 * (H0+1)**2 * 4 / 1024**2
+            result["total"]           = f_tables + g_tables + prefix + best_data * 4
+
+        except ImportError:
+            # fall back to dense estimate if C extension not available
+            dense = (W0+1)**2 * (H0+1)**2 * 4
+            result["slab_data"]   = dense
+            result["slab_mb"]     = dense / 1024**2
+            result["dense_cells"] = (W0+1)**2 * (H0+1)**2
+            result["dense_mb"]    = dense / 1024**2
+            result["total"]       = f_tables + g_tables + prefix + dense
+    else:
+        result["total"] = f_tables + g_tables + prefix
+
+    return result
 
 
 def print_dry_run(item_sizes, defect_sizes, defect_positions, sheet_size):
@@ -150,7 +170,7 @@ def print_dry_run(item_sizes, defect_sizes, defect_positions, sheet_size):
         print(f"  Total defect area: {defect_area:,}  ({defect_area/total_area*100:.1f}% of sheet)")
     print()
 
-    mem = estimate_memory(sheet_size, n_defects)
+    mem = estimate_memory(sheet_size, defect_sizes, defect_positions)
 
     print("  Estimated memory usage:")
     print(f"    g tables (values + indices):      {format_bytes(mem['g_tables'])}")
@@ -158,13 +178,20 @@ def print_dry_run(item_sizes, defect_sizes, defect_positions, sheet_size):
     print(f"    Prefix sum array:                 {format_bytes(mem['prefix'])}")
 
     if mem["has_defects"]:
-        print(f"    Fd dense 4D array:                {format_bytes(mem['fd_dense'])}  ({mem['fd_cells']:,} cells)")
-        print(f"    ----------------------------------------")
-        print(f"    Total estimated:                  {format_bytes(mem['total'])}")
+        print("  Fd slab estimate (strategy comparison):")
+        for name, tiles, data in mem.get("slab_strategies", []):
+            mb = data * 4 / 1024**2
+            print(f"    {name:<6}  tiles={tiles:,}  data={data:,}  ({mb:.1f} MB)")
+        sel  = mem.get("slab_selected", "?")
+        smb  = mem.get("slab_mb", 0)
+        dmb  = mem.get("dense_mb", 0)
+        pct  = mem.get("slab_data", 0) / max(mem.get("dense_cells",1), 1) * 100
+        print(f"    -> selected: {sel}  ({smb:.1f} MB,  {pct:.1f}% of dense {dmb:.1f} MB)")
+        print(f"    Total estimated:  {format_bytes(mem['total'])}")
     else:
         total_pure = mem["f_tables"] + mem["g_tables"] + mem["prefix"]
-        print(f"    Fd table:                         not needed (pure sheet)")
-        print(f"    ----------------------------------------")
+        print("    Fd table:                         not needed (pure sheet)")
+        print("    ----------------------------------------")
         print(f"    Total estimated:                  {format_bytes(total_pure)}")
 
     print()

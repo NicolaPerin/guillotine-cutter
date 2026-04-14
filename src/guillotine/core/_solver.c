@@ -280,6 +280,31 @@ static PyObject *py_fd_slab_stats(PyObject *Py_UNUSED(self), PyObject *args) {
 }
 
 
+static PyObject *py_estimate_slab(PyObject *Py_UNUSED(self), PyObject *args) {
+    int sheet_width, sheet_height, n_defects;
+    PyObject *o_defects;
+
+    if (!PyArg_ParseTuple(args, "iiOi",
+            &sheet_width, &sheet_height, &o_defects, &n_defects))
+        return NULL;
+
+    Py_buffer b_defects;
+    if (PyObject_GetBuffer(o_defects, &b_defects, PyBUF_SIMPLE) < 0)
+        return NULL;
+
+    SlabEstimate est = estimate_slab(
+        sheet_width, sheet_height,
+        (int32_t *)b_defects.buf, n_defects);
+
+    PyBuffer_Release(&b_defects);
+
+    return Py_BuildValue("(iLiLiL)",
+        est.tiles_1dx, (long long)est.data_1dx,
+        est.tiles_1dy, (long long)est.data_1dy,
+        est.tiles_2d,  (long long)est.data_2d);
+}
+
+
 /* =============================================================================
  * Module definition
  *
@@ -309,6 +334,9 @@ static PyMethodDef SolverMethods[] = {
 
     {"fd_slab_stats",  py_fd_slab_stats,   METH_VARARGS,
      "Return (slab_entries, dense_equivalent, n_tiles) for memory diagnostics."},
+
+    {"estimate_slab", py_estimate_slab, METH_VARARGS,
+     "Estimate slab size for all three merge strategies. Returns (tiles_1dx, data_1dx, tiles_1dy, data_1dy, tiles_2d, data_2d)."},
 
     {NULL, NULL, 0, NULL}
 };
