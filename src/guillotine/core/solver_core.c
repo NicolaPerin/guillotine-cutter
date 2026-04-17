@@ -365,7 +365,9 @@ static void evaluate_strategy(int sheet_width, int sheet_height,
  *   A. Sort defects by x for consistent interval merging.
  *   B. Evaluate all three merge strategies in parallel, pick the best.
  *   C. Allocate tiles[], compute per-tile data offsets, build local defect
- *      lists for each tile.
+ *      lists for each tile. The first tile per (w,h) is stored inline in
+ *      TileIndex; any additional tiles go into slab->tiles[] (overflow).
+ *      has_tiles[] is set to 1 for every (w,h) that has at least one tile.
  *   D. Allocate flat data[] array (uint16).
  *   E. For each (w, h) bottom-up, iterate over tiles:
  *        - Pure positions (prefix-sum check) are pre-filled with delta 0.
@@ -395,7 +397,10 @@ FdSlab *fill_Fd_slab(int sheet_width, int sheet_height,
     FdSlab *slab = (FdSlab *)calloc(1, sizeof(FdSlab));
     slab->sheet_width  = sheet_width;
     slab->sheet_height = sheet_height;
-    slab->tile_index   = (TileIndex *)calloc((sheet_width + 1) * col_stride, sizeof(TileIndex));
+
+    int index_size = (sheet_width + 1) * col_stride;
+    slab->tile_index = (TileIndex *)calloc(index_size, sizeof(TileIndex));
+    slab->has_tiles  = (uint8_t  *)calloc(index_size, sizeof(uint8_t));
 
     /* --- Phase B: evaluate all 3 strategies, pick best ---
      *
@@ -461,25 +466,63 @@ FdSlab *fill_Fd_slab(int sheet_width, int sheet_height,
     fprintf(stderr, "  -> selected: %s\n", strategy_names[best]);
     MergeStrategy chosen = strategies[best];
 
+    /* --- Phase C: allocate overflow tiles[], assign offsets, build local
+     *              defect lists for each tile.
+     *
+     * Tile layout change vs. original:
+     *   - The first tile for each (w,h) is stored inline in TileIndex
+     *     (first_tile_inline). No entry in slab->tiles[] is allocated for it.
+     *   - Additional tiles (tile_count > 1) are stored in slab->tiles[]
+     *     starting at overflow_start, with (tile_count - 1) entries each.
+     *
+     * has_tiles[wh_idx] is set to 1 for every (w,h) that has >= 1 tile.
+     *
+     * Two-pass approach:
+     *   Pass 1: count overflow tiles to size slab->tiles[].
+     *   Pass 2: fill tile_index[] and tiles[].
+     *
+     * We avoid a separate counting pass by building a temporary flat array
+     * of (tile_count, tiles[]) per (w,h) during the single Phase B re-run,
+     * then distributing into the slab. Instead, simpler: do one pass that
+     * fills inline + a dynamic overflow array, then compact.
+     *
+     * Implementation: single pass. We maintain overflow_cursor into
+     * slab->tiles[]. We pre-size slab->tiles[] to strat_tiles[best] as an
+     * upper bound on overflow (conservative: actual overflow = total_tiles -
+     * number_of_wh_pairs_with_tiles, since one tile per pair is inlined).
+     * -------------------------------------------------------------------- */
     int total_tiles = strat_tiles[best];
 
-    /* --- Phase C: allocate tiles, assign offsets, build local defect lists --- */
-    slab->tiles            = (Tile *)calloc(total_tiles, sizeof(Tile));
-    slab->total_tile_count = total_tiles;
-    int     tile_cursor = 0;
-    int64_t data_total  = 0;
+    /* Upper bound: at most (total_tiles) overflow entries (when every (w,h)
+     * has exactly 1 tile there are 0 overflow entries; worst case all pairs
+     * have 2+ tiles giving total_tiles - n_pairs_with_tiles overflow). */
+    slab->tiles = (Tile *)calloc(total_tiles, sizeof(Tile));
+    slab->total_tile_count = 0;  /* actual overflow count, filled below */
+
+    int     overflow_cursor = 0;
+    int64_t data_total      = 0;
 
     for (int w = 1; w <= sheet_width; w++) {
         for (int h = 1; h <= sheet_height; h++) {
 
-            TileIndex *ti = &slab->tile_index[w * col_stride + h];
-            ti->first_tile = tile_cursor;
+            int wh_idx = w * col_stride + h;
 
             int n_tiles = build_tiles_for_rect_size(w, h, sheet_width, sheet_height,
                                                     defects, n_defects,
                                                     interval_scratch, tile_scratch,
                                                     chosen);
 
+            if (n_tiles == 0) continue;
+
+            /* Mark this (w,h) as having tiles — enables the fast path in
+             * slab_lookup to skip tile_index[] entirely for pure pairs.  */
+            slab->has_tiles[wh_idx] = 1;
+
+            TileIndex *ti   = &slab->tile_index[wh_idx];
+            ti->tile_count  = n_tiles;
+
+            /* Helper lambda (as a local function via a nested loop) to build
+             * the local defect list for one tile and assign its data_offset. */
             for (int t = 0; t < n_tiles; t++) {
                 tile_scratch[t].data_offset = data_total;
                 data_total += (int64_t)tile_scratch[t].x_span * tile_scratch[t].y_span;
@@ -512,14 +555,21 @@ FdSlab *fill_Fd_slab(int sheet_width, int sheet_height,
                     tile_scratch[t].local_defect_indices = NULL;
                     tile_scratch[t].n_local_defects      = 0;
                 }
-
-                slab->tiles[tile_cursor++] = tile_scratch[t];
             }
 
-            ti->tile_count = n_tiles;
+            /* Store tile 0 inline in TileIndex. */
+            ti->first_tile_inline = tile_scratch[0];
+
+            /* Store tiles 1..n_tiles-1 in the overflow array. */
+            if (n_tiles > 1) {
+                ti->overflow_start = overflow_cursor;
+                for (int t = 1; t < n_tiles; t++)
+                    slab->tiles[overflow_cursor++] = tile_scratch[t];
+            }
         }
     }
 
+    slab->total_tile_count   = overflow_cursor;
     slab->total_data_entries = data_total;
     slab->overflow           = 0;
 
@@ -541,6 +591,10 @@ FdSlab *fill_Fd_slab(int sheet_width, int sheet_height,
      * Boolean masks deduplicate positions so each cut is evaluated once.
      * Stack arrays sized to sheet dimensions are safe for all practical
      * sheet sizes and compatible with OpenMP.
+     *
+     * Tile iteration uses the same two-level layout as Phase C:
+     *   tile 0  → ti->first_tile_inline
+     *   tiles 1..N-1 → slab->tiles[ti->overflow_start + 0..N-2]
      */
     for (int w = 1; w <= sheet_width; w++) {
 
@@ -550,14 +604,25 @@ FdSlab *fill_Fd_slab(int sheet_width, int sheet_height,
 
         for (int h = 1; h <= sheet_height; h++) {
 
+            int wh_idx = wh_base + h;
+
+            /* Skip pure (w,h) pairs entirely — nothing to fill. */
+            if (!slab->has_tiles[wh_idx]) continue;
+
             int n_y_cuts   = n_normal_cuts_y[h];
             int y_cut_base = h * max_y_cuts;
 
-            TileIndex *ti       = &slab->tile_index[wh_base + h];
-            int32_t    pure_val = F_values[wh_base + h];
+            TileIndex *ti       = &slab->tile_index[wh_idx];
+            int32_t    pure_val = F_values[wh_idx];
 
+            /* Iterate over all tiles for this (w,h).
+             * t=0: inline tile; t=1..N-1: overflow tiles. */
             for (int t = 0; t < ti->tile_count; t++) {
-                Tile     *tile      = &slab->tiles[ti->first_tile + t];
+
+                Tile *tile = (t == 0)
+                    ? &ti->first_tile_inline
+                    : &slab->tiles[ti->overflow_start + t - 1];
+
                 uint16_t *tile_data = &slab->data[tile->data_offset];
 
                 #pragma omp parallel for schedule(dynamic, 16) collapse(2)

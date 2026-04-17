@@ -109,6 +109,20 @@ static inline int32_t defect_count_in_rect(const int32_t *prefix, int stride,
  * stays well within uint16. The FdSlab.overflow flag is set if a write
  * would exceed UINT16_MAX; callers should treat the slab as invalid in
  * that case and fall back to a wider encoding.
+ *
+ * LOOKUP OPTIMIZATIONS:
+ *   1. has_tiles[] — a flat uint8 array, same shape as tile_index[], set to 1
+ *      iff the (w,h) pair has at least one tile. Checked first in slab_lookup
+ *      so that pure (w,h) pairs return F_values[w][h] without touching
+ *      tile_index[] or tiles[] at all, improving cache behaviour for the
+ *      majority of lookups which are pure.
+ *
+ *   2. Inlined first tile — TileIndex embeds a copy of the first Tile struct
+ *      directly (valid when tile_count >= 1). For the common single-tile case
+ *      this eliminates the second pointer dereference into tiles[], turning
+ *      the hot path from three cache misses (tile_index → tiles → data) into
+ *      two (tile_index → data).  When tile_count > 1 the remaining tiles are
+ *      still stored in tiles[] starting at overflow_start.
  * ============================================================================= */
 
 typedef struct {
@@ -120,17 +134,28 @@ typedef struct {
     int     n_local_defects;
 } Tile;
 
+/* TileIndex — one entry per (w, h) pair in the (sheet_width+1)*(sheet_height+1)
+ * index array.
+ *
+ * tile_count == 0  → pure pair, slab_lookup returns F_values[w][h] directly.
+ * tile_count == 1  → first_tile_inline is the only tile; overflow_start unused.
+ * tile_count >  1  → first_tile_inline holds tile 0; tiles[overflow_start ..
+ *                    overflow_start + tile_count - 2] hold tiles 1..N-1.
+ */
 typedef struct {
-    int first_tile;
-    int tile_count;
+    int  tile_count;
+    Tile first_tile_inline;   /* valid when tile_count >= 1 */
+    int  overflow_start;      /* index into FdSlab.tiles[] for tiles 1..N-1
+                                 (only used when tile_count > 1)            */
 } TileIndex;
 
 typedef struct {
     uint16_t  *data;                 /* delta = F[w][h] - Fd, uint16        */
-    Tile      *tiles;
+    Tile      *tiles;                /* overflow tiles (tile index >= 1)    */
     TileIndex *tile_index;
+    uint8_t   *has_tiles;            /* 1 iff tile_count >= 1 for this (w,h)*/
     int64_t    total_data_entries;
-    int        total_tile_count;
+    int        total_tile_count;     /* entries used in tiles[] (overflow)  */
     int        sheet_width, sheet_height;
     int        overflow;             /* set if any delta exceeded UINT16_MAX */
 } FdSlab;
@@ -139,12 +164,18 @@ typedef struct {
 /* =============================================================================
  * Slab lookup — retrieve Fd(rect_width, rect_height, sheet_x, sheet_y)
  *
- * Scans the tile list for (rect_width, rect_height). If (sheet_x, sheet_y)
- * falls inside a tile, returns F_values[w][h] - stored_delta. Otherwise the
- * position is pure and returns F_values[w][h] directly.
+ * Fast path (pure pair):
+ *   has_tiles[] is checked first. If zero, returns F_values[w][h] immediately
+ *   without touching tile_index[] or tiles[].
  *
- * The stored cell is uint16; the subtraction widens to int32 on return,
- * matching the int32 type used everywhere else in the DP.
+ * Common path (single tile):
+ *   The first tile is inlined in TileIndex so only one indirection is needed
+ *   to reach the tile bounds, then one more to reach data[]. Two cache misses
+ *   instead of three.
+ *
+ * Rare path (multiple tiles):
+ *   After the inlined tile is checked, remaining tiles are scanned from
+ *   tiles[overflow_start].
  *
  * Defined inline so the compiler can inline it into both solver_core.c
  * (hot DP inner loop — billions of calls) and _solver.c (reconstruction
@@ -156,13 +187,30 @@ static inline int32_t slab_lookup(const FdSlab  *slab,
                                   int rect_width, int rect_height,
                                   int sheet_x,    int sheet_y) {
 
-    const TileIndex *ti = &slab->tile_index[
-        rect_width * (slab->sheet_height + 1) + rect_height];
+    int wh_idx = rect_width * (slab->sheet_height + 1) + rect_height;
 
     int32_t F_wh = F_values[rect_width * col_stride + rect_height];
 
-    for (int t = 0; t < ti->tile_count; t++) {
-        const Tile *tile = &slab->tiles[ti->first_tile + t];
+    /* Fast path: no tiles for this (w,h) → pure, return F immediately. */
+    if (!slab->has_tiles[wh_idx])
+        return F_wh;
+
+    const TileIndex *ti = &slab->tile_index[wh_idx];
+
+    /* Check inlined first tile. */
+    const Tile *tile = &ti->first_tile_inline;
+    if (sheet_x >= tile->sheet_x_lo && sheet_x <= tile->sheet_x_hi &&
+        sheet_y >= tile->sheet_y_lo && sheet_y <= tile->sheet_y_hi) {
+        int local_x = sheet_x - tile->sheet_x_lo;
+        int local_y = sheet_y - tile->sheet_y_lo;
+        uint16_t delta = slab->data[
+            tile->data_offset + (int64_t)local_x * tile->y_span + local_y];
+        return F_wh - (int32_t)delta;
+    }
+
+    /* Overflow tiles (tile_count > 1). */
+    for (int t = 0; t < ti->tile_count - 1; t++) {
+        tile = &slab->tiles[ti->overflow_start + t];
         if (sheet_x >= tile->sheet_x_lo && sheet_x <= tile->sheet_x_hi &&
             sheet_y >= tile->sheet_y_lo && sheet_y <= tile->sheet_y_hi) {
             int local_x = sheet_x - tile->sheet_x_lo;
