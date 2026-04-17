@@ -151,11 +151,19 @@ class GuillotineDP:
                 int(self.patterns.np_y_arr.shape[1]),
                 self.geom.n_def,
             )
-            slab_entries, dense_entries, n_tiles = _solver.fd_slab_stats(self._fd_slab)
-            print(f"Fd slab: {slab_entries:,} entries ({slab_entries * 4 / 1024 / 1024:.1f} MB) "
+            slab_entries, dense_entries, n_tiles, overflow = _solver.fd_slab_stats(self._fd_slab)
+            if overflow:
+                raise RuntimeError(
+                    "Fd slab uint16 delta encoding overflowed (some delta > 65535). "
+                    "This can happen for large sheets where F[W0][H0] exceeds 65535. "
+                    "Rebuild the solver with a wider data type (int32) for this problem."
+                )
+            slab_bytes  = slab_entries  * 2   # uint16
+            dense_bytes = dense_entries * 4   # would be int32 if materialized
+            print(f"Fd slab: {slab_entries:,} deltas ({slab_bytes / 1024 / 1024:.1f} MB uint16) "
                   f"in {n_tiles:,} tiles, "
-                  f"vs dense {dense_entries:,} ({dense_entries * 4 / 1024 / 1024:.1f} MB), "
-                  f"ratio {slab_entries / max(dense_entries, 1) * 100:.2f}%")
+                  f"vs dense {dense_entries:,} ({dense_bytes / 1024 / 1024:.1f} MB int32), "
+                  f"ratio {slab_bytes / max(dense_bytes, 1) * 100:.2f}%")
             return
         except ImportError:
             pass

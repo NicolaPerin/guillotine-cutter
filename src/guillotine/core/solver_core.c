@@ -357,18 +357,23 @@ static void evaluate_strategy(int sheet_width, int sheet_height,
 /* =============================================================================
  * Phase 3 — Fd-table: optimal value for defected rectangles
  *
- * Builds the sparse FdSlab and fills it with a bottom-up DP.
+ * Builds the sparse FdSlab and fills it with a bottom-up DP. The slab stores
+ * uint16 deltas (F[w][h] - Fd) rather than raw Fd values, halving the
+ * memory footprint of the data[] array.
  *
  * Phases:
  *   A. Sort defects by x for consistent interval merging.
  *   B. Evaluate all three merge strategies in parallel, pick the best.
  *   C. Allocate tiles[], compute per-tile data offsets, build local defect
  *      lists for each tile.
- *   D. Allocate flat data[] array.
+ *   D. Allocate flat data[] array (uint16).
  *   E. For each (w, h) bottom-up, iterate over tiles:
- *        - Pure positions (prefix-sum check) are pre-filled with F_values[w][h].
+ *        - Pure positions (prefix-sum check) are pre-filled with delta 0.
  *        - Defected positions use Extended Normal Patterns (Zhang et al. 2023):
  *          Minkowski sum of reference points {0, defect edges} and normal cuts.
+ *          The computed Fd value is converted to delta = pure_val - Fd and
+ *          stored. An overflow flag in the slab is raised if delta exceeds
+ *          UINT16_MAX so callers can detect and recover.
  *
  * OpenMP parallelizes the (sx, sy) loop within each tile.
  * ============================================================================= */
@@ -516,9 +521,10 @@ FdSlab *fill_Fd_slab(int sheet_width, int sheet_height,
     }
 
     slab->total_data_entries = data_total;
+    slab->overflow           = 0;
 
-    /* --- Phase D: allocate flat data array --- */
-    slab->data = (int32_t *)malloc(data_total * sizeof(int32_t));
+    /* --- Phase D: allocate flat data array (uint16 deltas) --- */
+    slab->data = (uint16_t *)malloc(data_total * sizeof(uint16_t));
 
     /* --- Phase E: bottom-up DP fill ---
      *
@@ -551,14 +557,15 @@ FdSlab *fill_Fd_slab(int sheet_width, int sheet_height,
             int32_t    pure_val = F_values[wh_base + h];
 
             for (int t = 0; t < ti->tile_count; t++) {
-                Tile    *tile      = &slab->tiles[ti->first_tile + t];
-                int32_t *tile_data = &slab->data[tile->data_offset];
+                Tile     *tile      = &slab->tiles[ti->first_tile + t];
+                uint16_t *tile_data = &slab->data[tile->data_offset];
 
                 #pragma omp parallel for schedule(dynamic, 16) collapse(2)
                 for (int sx = tile->sheet_x_lo; sx <= tile->sheet_x_hi; sx++) {
                     for (int sy = tile->sheet_y_lo; sy <= tile->sheet_y_hi; sy++) {
 
-                        /* O(1) purity check via 2D prefix sum. */
+                        /* O(1) purity check via 2D prefix sum.
+                         * Pure cell → Fd == pure_val → delta == 0. */
                         int32_t n_defects_here = defect_count_in_rect(
                             defect_count_prefix, col_stride,
                             sx, sy, sx + w, sy + h);
@@ -566,7 +573,7 @@ FdSlab *fill_Fd_slab(int sheet_width, int sheet_height,
                         if (n_defects_here == 0) {
                             int local_x = sx - tile->sheet_x_lo;
                             int local_y = sy - tile->sheet_y_lo;
-                            tile_data[(int64_t)local_x * tile->y_span + local_y] = pure_val;
+                            tile_data[(int64_t)local_x * tile->y_span + local_y] = 0;
                             continue;
                         }
 
@@ -637,7 +644,20 @@ FdSlab *fill_Fd_slab(int sheet_width, int sheet_height,
 
                         int local_x = sx - tile->sheet_x_lo;
                         int local_y = sy - tile->sheet_y_lo;
-                        tile_data[(int64_t)local_x * tile->y_span + local_y] = best_value;
+
+                        /* Store delta = pure_val - best_value.
+                         * delta >= 0 always (Fd <= F).
+                         * delta may exceed UINT16_MAX for problems with very
+                         * large F values (total items area > 65535). We set a
+                         * flag; Python will raise rather than silently return
+                         * a truncated, incorrect result. */
+                        int32_t delta = pure_val - best_value;
+                        if (delta > (int32_t)UINT16_MAX) {
+                            #pragma omp atomic write
+                            slab->overflow = 1;
+                        }
+                        tile_data[(int64_t)local_x * tile->y_span + local_y] =
+                            (uint16_t)delta;
                     }
                 }
             }

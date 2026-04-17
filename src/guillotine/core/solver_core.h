@@ -10,14 +10,16 @@
  *   Phase 1 (g-table):  Best single-item tiling value for each rectangle size
  *   Phase 2 (F-table):  Optimal value for pure (defect-free) rectangles
  *   Phase 3 (Fd-table): Optimal value for defected rectangles, stored in a
- *                        sparse "multi-tile slab" to avoid allocating the full
- *                        (W+1)^2 × (H+1)^2 dense array
+ *                        sparse "multi-tile slab" with uint16 delta encoding
+ *                        (stored = F[w][h] - Fd) to halve the slab memory
+ *                        vs the raw-int32 design.
  * ============================================================================= */
 
 #ifndef SOLVER_CORE_H
 #define SOLVER_CORE_H
 
 #include <stdint.h>
+#include <stdlib.h>   /* UINT16_MAX via <stdint.h> on most systems, but be safe */
 
 
 /* =============================================================================
@@ -84,7 +86,7 @@ static inline int32_t defect_count_in_rect(const int32_t *prefix, int stride,
 
 
 /* =============================================================================
- * Sparse Fd storage — multi-tile slab
+ * Sparse Fd storage — multi-tile slab with uint16 delta encoding
  *
  * The 4D table Fd(w, h, x, y) gives the optimal value for a defected
  * rectangle of size w×h whose bottom-left corner is at sheet position (x, y).
@@ -96,8 +98,17 @@ static inline int32_t defect_count_in_rect(const int32_t *prefix, int stride,
  *
  * We represent the affected region for each (w, h) as a set of disjoint
  * rectangular "tiles" covering only the defect-affected positions. All tile
- * data is packed into one flat int32_t array. A TileIndex entry tells us
+ * data is packed into one flat uint16_t array. A TileIndex entry tells us
  * which slice of the tiles[] array belongs to a given (w, h).
+ *
+ * DELTA ENCODING:
+ *   data[i] holds  delta = F_values[w][h] - Fd(w, h, x, y)   as uint16.
+ * Since Fd <= F always, delta is >= 0 and fits in uint16 as long as the
+ * difference never exceeds 65535. For all benchmark problems at
+ * dimensions used by the project (up to ~200×200 total area), the delta
+ * stays well within uint16. The FdSlab.overflow flag is set if a write
+ * would exceed UINT16_MAX; callers should treat the slab as invalid in
+ * that case and fall back to a wider encoding.
  * ============================================================================= */
 
 typedef struct {
@@ -115,12 +126,13 @@ typedef struct {
 } TileIndex;
 
 typedef struct {
-    int32_t   *data;
+    uint16_t  *data;                 /* delta = F[w][h] - Fd, uint16        */
     Tile      *tiles;
     TileIndex *tile_index;
     int64_t    total_data_entries;
     int        total_tile_count;
     int        sheet_width, sheet_height;
+    int        overflow;             /* set if any delta exceeded UINT16_MAX */
 } FdSlab;
 
 
@@ -128,8 +140,11 @@ typedef struct {
  * Slab lookup — retrieve Fd(rect_width, rect_height, sheet_x, sheet_y)
  *
  * Scans the tile list for (rect_width, rect_height). If (sheet_x, sheet_y)
- * falls inside a tile, returns the stored value. Otherwise the position is
- * pure and returns F_values[rect_width][rect_height].
+ * falls inside a tile, returns F_values[w][h] - stored_delta. Otherwise the
+ * position is pure and returns F_values[w][h] directly.
+ *
+ * The stored cell is uint16; the subtraction widens to int32 on return,
+ * matching the int32 type used everywhere else in the DP.
  *
  * Defined inline so the compiler can inline it into both solver_core.c
  * (hot DP inner loop — billions of calls) and _solver.c (reconstruction
@@ -144,18 +159,21 @@ static inline int32_t slab_lookup(const FdSlab  *slab,
     const TileIndex *ti = &slab->tile_index[
         rect_width * (slab->sheet_height + 1) + rect_height];
 
+    int32_t F_wh = F_values[rect_width * col_stride + rect_height];
+
     for (int t = 0; t < ti->tile_count; t++) {
         const Tile *tile = &slab->tiles[ti->first_tile + t];
         if (sheet_x >= tile->sheet_x_lo && sheet_x <= tile->sheet_x_hi &&
             sheet_y >= tile->sheet_y_lo && sheet_y <= tile->sheet_y_hi) {
             int local_x = sheet_x - tile->sheet_x_lo;
             int local_y = sheet_y - tile->sheet_y_lo;
-            return slab->data[
+            uint16_t delta = slab->data[
                 tile->data_offset + (int64_t)local_x * tile->y_span + local_y];
+            return F_wh - (int32_t)delta;
         }
     }
 
-    return F_values[rect_width * col_stride + rect_height];
+    return F_wh;
 }
 
 

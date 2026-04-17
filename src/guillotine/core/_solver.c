@@ -250,13 +250,15 @@ static PyObject *py_fd_slab_lookup(PyObject *Py_UNUSED(self), PyObject *args) {
 /* =============================================================================
  * py_fd_slab_stats — diagnostics for memory usage analysis
  *
- * Returns a 3-tuple:
- *   (slab_entries,      — actual number of int32_t values stored in the slab
+ * Returns a 4-tuple:
+ *   (slab_entries,      — actual number of uint16_t values stored in the slab
  *    dense_equivalent,  — number of entries a full dense 4D array would need
- *    n_tiles)           — total number of tiles across all (w, h) pairs
+ *    n_tiles,           — total number of tiles across all (w, h) pairs
+ *    overflow)          — 1 if any delta exceeded UINT16_MAX during fill,
+ *                         otherwise 0. Callers should raise on overflow.
  *
- * The ratio slab_entries / dense_equivalent shows the memory savings
- * (typically ~20-25% for randomly placed defects).
+ * The ratio (slab_entries * 2) / (dense_equivalent * 4) shows the effective
+ * memory savings from both sparse tiling and uint16 delta encoding.
  *
  * Args from Python:
  *   (capsule,)  — PyCapsule wrapping the FdSlab
@@ -273,10 +275,11 @@ static PyObject *py_fd_slab_stats(PyObject *Py_UNUSED(self), PyObject *args) {
     int64_t dense = (int64_t)(slab->sheet_width  + 1) * (slab->sheet_width  + 1)
                   * (int64_t)(slab->sheet_height + 1) * (slab->sheet_height + 1);
 
-    return Py_BuildValue("(LLi)",
+    return Py_BuildValue("(LLii)",
         (long long)slab->total_data_entries,
         (long long)dense,
-        slab->total_tile_count);
+        slab->total_tile_count,
+        slab->overflow);
 }
 
 
@@ -333,7 +336,7 @@ static PyMethodDef SolverMethods[] = {
      "Lookup a single Fd(w, h, x, y) value from the slab capsule."},
 
     {"fd_slab_stats",  py_fd_slab_stats,   METH_VARARGS,
-     "Return (slab_entries, dense_equivalent, n_tiles) for memory diagnostics."},
+     "Return (slab_entries, dense_equivalent, n_tiles, overflow) for memory diagnostics."},
 
     {"estimate_slab", py_estimate_slab, METH_VARARGS,
      "Estimate slab size for all three merge strategies. Returns (tiles_1dx, data_1dx, tiles_1dy, data_1dy, tiles_2d, data_2d)."},
