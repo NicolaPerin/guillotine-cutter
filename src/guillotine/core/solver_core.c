@@ -4,6 +4,36 @@
  * Implements the three DP phases declared in solver_core.h.
  * This file has no Python dependency — it can be compiled standalone
  * for testing, benchmarking, or linking into other language bindings.
+ *
+ * The solver operates in three phases:
+ *   Phase 1 (g-table)   best single-item tiling value for each (w, h)
+ *   Phase 2 (F-table)   optimal value for defect-free rectangles
+ *   Phase 3 (Fd-table)  optimal value for defect-affected rectangles,
+ *                        stored in a sparse slab with uint16 delta encoding
+ *
+ * Change vs. original: defect-index arena
+ * ----------------------------------------
+ * Each tile needs a small list of which defects overlap it (used in Phase 3
+ * to build Extended Normal Pattern cut candidates per cell).  The original
+ * design malloc'd a separate int[] per tile — roughly 1800 scattered heap
+ * allocations for a 100×100 problem.
+ *
+ * The new design stores all local-defect lists in a single contiguous
+ * int[] arena (FdSlab.defect_pool).  Each Tile records its start offset
+ * in that arena as a 4-byte int32_t instead of an 8-byte pointer.
+ *
+ * Benefits:
+ *   - ~1800 malloc/realloc/free calls reduced to one
+ *   - All defect lists laid out contiguously → better spatial locality
+ *   - Tile struct is 4 bytes smaller (pointer → int32); TileIndex shrinks
+ *     by the same amount since it embeds a Tile inline
+ *   - Teardown is a single free(slab->defect_pool)
+ *
+ * Phase C is therefore split into two passes:
+ *   Pass C-1  build tile geometry, count local defects per tile,
+ *             assign pool offsets, accumulate the total entry count
+ *   Pass C-2  fill defect_pool[] using the geometry already in the slab
+ *             (build_tiles() is not called again)
  * ============================================================================= */
 
 #include "solver_core.h"
@@ -11,35 +41,31 @@
 #include <string.h>
 #include <stdio.h>
 
+
 /* =============================================================================
- * PositionInterval — scratch struct used while building tiles for one (w, h).
+ * PositionInterval — scratch type used while building tiles for one (w, h).
  *
- * Represents the x-range [x_lo, x_hi] of sheet positions affected by one
- * defect, together with the corresponding y-range [y_lo, y_hi].
- * These are temporary — allocated on the heap once and reused for every
- * (w, h) iteration.
+ * Represents the sheet-position range [x_lo, x_hi] × [y_lo, y_hi] of
+ * positions whose rectangle overlaps a single defect.  These are temporary
+ * and are allocated once and reused across all (w, h) iterations.
  * ============================================================================= */
-typedef struct {
-    int x_lo, x_hi;
-    int y_lo, y_hi;
-} PositionInterval;
+typedef struct { int x_lo, x_hi, y_lo, y_hi; } PositionInterval;
 
 
 /* =============================================================================
  * qsort comparators
  * ============================================================================= */
 
-static int compare_defects_by_x(const void *a, const void *b) {
-    int32_t xa = *(const int32_t *)a;
-    int32_t xb = *(const int32_t *)b;
+static int cmp_defects_x(const void *a, const void *b) {
+    int32_t xa = *(const int32_t *)a, xb = *(const int32_t *)b;
     return (xa > xb) - (xa < xb);
 }
 
-static int compare_intervals_by_x_lo(const void *a, const void *b) {
+static int cmp_iv_x(const void *a, const void *b) {
     return ((const PositionInterval *)a)->x_lo - ((const PositionInterval *)b)->x_lo;
 }
 
-static int compare_intervals_by_y_lo(const void *a, const void *b) {
+static int cmp_iv_y(const void *a, const void *b) {
     return ((const PositionInterval *)a)->y_lo - ((const PositionInterval *)b)->y_lo;
 }
 
@@ -47,302 +73,246 @@ static int compare_intervals_by_y_lo(const void *a, const void *b) {
 /* =============================================================================
  * Phase 1 — g-table: best single-item tiling
  *
- * For every rectangle size (rect_width × rect_height), compute:
- *   g_values[rect_width][rect_height]     = max area coverable by tiling with
- *                                           nx × ny copies of one item type
- *   g_item_index[rect_width][rect_height] = which item type achieves that,
- *                                           or -1 if no item fits at all
+ * For every rectangle size (rw × rh), find the item type that maximises
+ * covered area when tiled in a grid of nx × ny copies, and store the
+ * resulting area in g_values[rw][rh].  g_item_index records which item
+ * type achieved it, or -1 if no item fits.
  *
- * Both output arrays are (sheet_width+1) × (sheet_height+1) in row-major order.
- *
- * The outer loop over rect_width is parallelized with OpenMP since each
- * width is independent — no data dependencies between different widths.
+ * The outer loop over rw is parallelised: each width is independent.
  * ============================================================================= */
 void fill_g_table(int sheet_width, int sheet_height,
-                  int32_t *g_values,
-                  int32_t *g_item_index,
-                  int32_t *item_widths,
-                  int32_t *item_heights,
-                  int32_t *item_areas,
-                  int      n_items) {
+                  int32_t *g_values, int32_t *g_item_index,
+                  int32_t *item_widths, int32_t *item_heights,
+                  int32_t *item_areas, int n_items) {
 
     int col_stride = sheet_height + 1;
 
     #pragma omp parallel for schedule(dynamic)
-    for (int rect_width = 1; rect_width <= sheet_width; rect_width++) {
-
-        int row_base = rect_width * col_stride;
-
-        for (int rect_height = 1; rect_height <= sheet_height; rect_height++) {
-
-            int32_t best_value = 0;
-            int32_t best_item  = -1;
-
-            for (int item = 0; item < n_items; item++) {
-                int copies_x = rect_width  / item_widths[item];
-                int copies_y = rect_height / item_heights[item];
-
-                if (copies_x > 0 && copies_y > 0) {
-                    int32_t covered_area = item_areas[item] * copies_x * copies_y;
-                    if (covered_area > best_value) {
-                        best_value = covered_area;
-                        best_item  = item;
-                    }
+    for (int rw = 1; rw <= sheet_width; rw++) {
+        int base = rw * col_stride;
+        for (int rh = 1; rh <= sheet_height; rh++) {
+            int32_t best_value = 0, best_item = -1;
+            for (int i = 0; i < n_items; i++) {
+                int cx = rw / item_widths[i], cy = rh / item_heights[i];
+                if (cx > 0 && cy > 0) {
+                    int32_t area = item_areas[i] * cx * cy;
+                    if (area > best_value) { best_value = area; best_item = i; }
                 }
             }
-
-            g_values    [row_base + rect_height] = best_value;
-            g_item_index[row_base + rect_height] = best_item;
+            g_values[base + rh]     = best_value;
+            g_item_index[base + rh] = best_item;
         }
     }
 }
 
 
 /* =============================================================================
- * Phase 2 — F-table: optimal value for pure (defect-free) rectangles
+ * Phase 2 — F-table: optimal value for defect-free rectangles
  *
- * Bottom-up DP. For each (rect_width, rect_height), the optimal decision is
- * the best among:
- *   - Tiling with copies of one item type         (from g_values)
- *   - A vertical guillotine cut at position z      (F[z][h] + F[w-z][h])
- *   - A horizontal guillotine cut at position z    (F[w][z] + F[w][h-z])
+ * Bottom-up DP.  For each (rw, rh), the best value is the maximum of:
+ *   - Tiling with copies of one item type          (from g_values)
+ *   - A vertical guillotine cut at position z      (F[z][rh] + F[rw-z][rh])
+ *   - A horizontal guillotine cut at position z    (F[rw][z] + F[rw][rh-z])
  *
- * Only cut positions listed in the normal-pattern arrays are tried,
- * and only up to half the dimension (symmetry: cutting at z is equivalent
- * to cutting at w-z, so we only try z <= w/2).
+ * Only positions in the normal-pattern arrays are tried, and only up to
+ * half the dimension (symmetry: cutting at z == cutting at rw-z).
  *
- * This phase is NOT parallelized because each (w, h) depends on all
- * smaller (w', h') values — strict bottom-up ordering is required.
- *
- * Output arrays F_values, F_decision_type, F_decision_param are all
- * (sheet_width+1) × (sheet_height+1) in row-major order.
+ * Not parallelised: each (rw, rh) depends on all smaller values.
  * ============================================================================= */
 void fill_F_table(int sheet_width, int sheet_height,
-                  int32_t *g_values,
-                  int32_t *g_item_index,
-                  int32_t *F_values,
-                  int8_t  *F_decision_type,
+                  int32_t *g_values, int32_t *g_item_index,
+                  int32_t *F_values, int8_t *F_decision_type,
                   int32_t *F_decision_param,
-                  int32_t *normal_cuts_x,
-                  int32_t *n_normal_cuts_x,
-                  int      max_x_cuts,
-                  int32_t *normal_cuts_y,
-                  int32_t *n_normal_cuts_y,
-                  int      max_y_cuts) {
+                  int32_t *normal_cuts_x, int32_t *n_normal_cuts_x, int max_x_cuts,
+                  int32_t *normal_cuts_y, int32_t *n_normal_cuts_y, int max_y_cuts) {
 
     int col_stride = sheet_height + 1;
 
-    for (int rect_width = 1; rect_width <= sheet_width; rect_width++) {
+    for (int rw = 1; rw <= sheet_width; rw++) {
+        int base = rw * col_stride;
+        int nxc  = n_normal_cuts_x[rw];
+        int xcb  = rw * max_x_cuts;
+        int hw   = rw >> 1;
 
-        int row_base   = rect_width * col_stride;
-        int n_x_cuts   = n_normal_cuts_x[rect_width];
-        int x_cut_base = rect_width * max_x_cuts;
-        int half_width = rect_width >> 1;
+        for (int rh = 1; rh <= sheet_height; rh++) {
+            int nyc = n_normal_cuts_y[rh];
+            int ycb = rh * max_y_cuts;
+            int hh  = rh >> 1;
 
-        for (int rect_height = 1; rect_height <= sheet_height; rect_height++) {
-
-            int n_y_cuts    = n_normal_cuts_y[rect_height];
-            int y_cut_base  = rect_height * max_y_cuts;
-            int half_height = rect_height >> 1;
-
-            /* Start with the best single-item tiling. */
-            int32_t best_item  = g_item_index[row_base + rect_height];
-            int32_t best_value = g_values    [row_base + rect_height];
+            int32_t best_item  = g_item_index[base + rh];
+            int32_t best_value = g_values[base + rh];
             int8_t  best_type  = (best_item >= 0) ? DECISION_FILL : DECISION_EMPTY;
             int32_t best_param = (best_item >= 0) ? best_item : 0;
 
-            /* Try vertical cuts — symmetry: only cut_pos <= half_width. */
-            for (int ci = 0; ci < n_x_cuts; ci++) {
-                int cut_pos = normal_cuts_x[x_cut_base + ci];
-                if (cut_pos > half_width) break;
-                int32_t combined = F_values[cut_pos * col_stride + rect_height]
-                                 + F_values[(rect_width - cut_pos) * col_stride + rect_height];
-                if (combined > best_value) {
-                    best_value = combined;
-                    best_type  = DECISION_CUT_X;
-                    best_param = cut_pos;
+            for (int ci = 0; ci < nxc; ci++) {
+                int z = normal_cuts_x[xcb + ci];
+                if (z > hw) break;
+                int32_t v = F_values[z * col_stride + rh]
+                          + F_values[(rw - z) * col_stride + rh];
+                if (v > best_value) {
+                    best_value = v; best_type = DECISION_CUT_X; best_param = z;
+                }
+            }
+            for (int ci = 0; ci < nyc; ci++) {
+                int z = normal_cuts_y[ycb + ci];
+                if (z > hh) break;
+                int32_t v = F_values[base + z] + F_values[base + (rh - z)];
+                if (v > best_value) {
+                    best_value = v; best_type = DECISION_CUT_Y; best_param = z;
                 }
             }
 
-            /* Try horizontal cuts — symmetry: only cut_pos <= half_height. */
-            for (int ci = 0; ci < n_y_cuts; ci++) {
-                int cut_pos = normal_cuts_y[y_cut_base + ci];
-                if (cut_pos > half_height) break;
-                int32_t combined = F_values[row_base + cut_pos]
-                                 + F_values[row_base + (rect_height - cut_pos)];
-                if (combined > best_value) {
-                    best_value = combined;
-                    best_type  = DECISION_CUT_Y;
-                    best_param = cut_pos;
-                }
-            }
-
-            F_values        [row_base + rect_height] = best_value;
-            F_decision_type [row_base + rect_height] = best_type;
-            F_decision_param[row_base + rect_height] = best_param;
+            F_values[base + rh]         = best_value;
+            F_decision_type[base + rh]  = best_type;
+            F_decision_param[base + rh] = best_param;
         }
     }
 }
 
 
 /* =============================================================================
- * Tile builder — merge defect-affected intervals for one (rect_width, rect_height)
+ * Tile builder
  *
- * For each defect, the set of sheet positions (x, y) such that the rectangle
- * [x, x+rect_width) × [y, y+rect_height) overlaps that defect is:
- *   x ∈ [defect.x_start - rect_width  + 1,  defect.x_end - 1]
- *   y ∈ [defect.y_start - rect_height + 1,  defect.y_end - 1]
- * both clamped to the valid sheet range [0, sheet_dim - rect_dim].
+ * For a rectangle of size rw × rh, compute the set of sheet positions
+ * (sx, sy) such that [sx, sx+rw) × [sy, sy+rh) overlaps at least one
+ * defect.  The affected region is represented as a small set of disjoint
+ * rectangular tiles.
  *
- * The scratch arrays (scratch_intervals, out_tiles) are caller-provided
- * and reused across all (w, h) iterations to avoid repeated allocation.
+ * For each defect, the affected x-range is:
+ *   [defect.x_start - rw + 1,  defect.x_end - 1]  (clamped to [0, sw-rw])
+ * and similarly for y.  These per-defect rectangles are then merged
+ * according to the chosen strategy to form the final tile list.
  *
- * Returns the number of tiles written to out_tiles[].
+ * Three merge strategies:
+ *   MERGE_1D_X  sort by x_lo, merge adjacent/overlapping x-ranges
+ *               (best when defects are spread horizontally)
+ *   MERGE_1D_Y  sort by y_lo, merge adjacent/overlapping y-ranges
+ *   MERGE_2D    iteratively merge any two rectangles that overlap in
+ *               both x and y (fewest tiles, but O(n²) per merge step)
+ *
+ * Phase B evaluates all three strategies and picks the best for the
+ * current problem instance (see fill_Fd_slab).
+ *
+ * scratch  caller-provided buffer of at least n_defects PositionIntervals
+ * out      caller-provided buffer of at least n_defects Tiles
+ * returns  number of tiles written to out[], or 0 if no defect overlaps
  * ============================================================================= */
-typedef enum {
-    MERGE_1D_X,
-    MERGE_1D_Y,
-    MERGE_2D,
-} MergeStrategy;
+typedef enum { MERGE_1D_X, MERGE_1D_Y, MERGE_2D } MergeStrategy;
 
+static int build_tiles(int rw, int rh, int sw, int sh,
+                       const int32_t *defects, int n_defects,
+                       PositionInterval *scratch, Tile *out,
+                       MergeStrategy strategy) {
+    int max_sx = sw - rw;
+    int max_sy = sh - rh;
+    int n = 0;
 
-static int build_tiles_for_rect_size(int rect_width, int rect_height,
-                                     int sheet_width, int sheet_height,
-                                     const int32_t *defect_array, int n_defects,
-                                     PositionInterval *scratch_intervals,
-                                     Tile *out_tiles,
-                                     MergeStrategy strategy) {
-
-    int max_x_pos = sheet_width  - rect_width;
-    int max_y_pos = sheet_height - rect_height;
-
-    int n_intervals = 0;
     for (int d = 0; d < n_defects; d++) {
-        DefectRef def = defect_at(defect_array, d);
-
-        int x_lo = defect_x_start(def) - rect_width  + 1;
-        int x_hi = defect_x_end(def)   - 1;
-        int y_lo = defect_y_start(def) - rect_height + 1;
-        int y_hi = defect_y_end(def)   - 1;
-
-        if (x_lo < 0)         x_lo = 0;
-        if (x_hi > max_x_pos) x_hi = max_x_pos;
-        if (y_lo < 0)         y_lo = 0;
-        if (y_hi > max_y_pos) y_hi = max_y_pos;
-
-        if (x_lo <= x_hi && y_lo <= y_hi) {
-            scratch_intervals[n_intervals].x_lo = x_lo;
-            scratch_intervals[n_intervals].x_hi = x_hi;
-            scratch_intervals[n_intervals].y_lo = y_lo;
-            scratch_intervals[n_intervals].y_hi = y_hi;
-            n_intervals++;
+        DefectRef df = defect_at(defects, d);
+        int xl = defect_x_start(df) - rw + 1; if (xl < 0)      xl = 0;
+        int xh = defect_x_end(df)   - 1;      if (xh > max_sx) xh = max_sx;
+        int yl = defect_y_start(df) - rh + 1; if (yl < 0)      yl = 0;
+        int yh = defect_y_end(df)   - 1;      if (yh > max_sy) yh = max_sy;
+        if (xl <= xh && yl <= yh) {
+            scratch[n].x_lo = xl; scratch[n].x_hi = xh;
+            scratch[n].y_lo = yl; scratch[n].y_hi = yh;
+            n++;
         }
     }
-
-    if (n_intervals == 0) return 0;
+    if (n == 0) return 0;
 
     if (strategy == MERGE_1D_X || strategy == MERGE_1D_Y) {
-
-        if (strategy == MERGE_1D_X)
-            qsort(scratch_intervals, n_intervals, sizeof(PositionInterval),
-                  compare_intervals_by_x_lo);
-        else
-            qsort(scratch_intervals, n_intervals, sizeof(PositionInterval),
-                  compare_intervals_by_y_lo);
+        qsort(scratch, n, sizeof(PositionInterval),
+              (strategy == MERGE_1D_X) ? cmp_iv_x : cmp_iv_y);
 
         int n_tiles = 0;
-        PositionInterval current = scratch_intervals[0];
-
-        for (int i = 1; i < n_intervals; i++) {
-            PositionInterval *next = &scratch_intervals[i];
-
-            int primary_merge = (strategy == MERGE_1D_X)
-                ? (next->x_lo <= current.x_hi + 1)
-                : (next->y_lo <= current.y_hi + 1);
-
-            if (primary_merge) {
-                if (next->x_hi > current.x_hi) current.x_hi = next->x_hi;
-                if (next->y_hi > current.y_hi) current.y_hi = next->y_hi;
-                if (next->x_lo < current.x_lo) current.x_lo = next->x_lo;
-                if (next->y_lo < current.y_lo) current.y_lo = next->y_lo;
+        PositionInterval cur = scratch[0];
+        for (int i = 1; i < n; i++) {
+            int adjacent = (strategy == MERGE_1D_X)
+                ? (scratch[i].x_lo <= cur.x_hi + 1)
+                : (scratch[i].y_lo <= cur.y_hi + 1);
+            if (adjacent) {
+                /* Extend the current merged region to cover scratch[i]. */
+                if (scratch[i].x_hi > cur.x_hi) cur.x_hi = scratch[i].x_hi;
+                if (scratch[i].y_hi > cur.y_hi) cur.y_hi = scratch[i].y_hi;
+                if (scratch[i].x_lo < cur.x_lo) cur.x_lo = scratch[i].x_lo;
+                if (scratch[i].y_lo < cur.y_lo) cur.y_lo = scratch[i].y_lo;
             } else {
-                out_tiles[n_tiles].sheet_x_lo = current.x_lo;
-                out_tiles[n_tiles].sheet_x_hi = current.x_hi;
-                out_tiles[n_tiles].sheet_y_lo = current.y_lo;
-                out_tiles[n_tiles].sheet_y_hi = current.y_hi;
-                out_tiles[n_tiles].x_span = current.x_hi - current.x_lo + 1;
-                out_tiles[n_tiles].y_span = current.y_hi - current.y_lo + 1;
+                out[n_tiles].sheet_x_lo = cur.x_lo;
+                out[n_tiles].sheet_x_hi = cur.x_hi;
+                out[n_tiles].sheet_y_lo = cur.y_lo;
+                out[n_tiles].sheet_y_hi = cur.y_hi;
+                out[n_tiles].x_span     = cur.x_hi - cur.x_lo + 1;
+                out[n_tiles].y_span     = cur.y_hi - cur.y_lo + 1;
                 n_tiles++;
-                current = *next;
+                cur = scratch[i];
             }
         }
-        out_tiles[n_tiles].sheet_x_lo = current.x_lo;
-        out_tiles[n_tiles].sheet_x_hi = current.x_hi;
-        out_tiles[n_tiles].sheet_y_lo = current.y_lo;
-        out_tiles[n_tiles].sheet_y_hi = current.y_hi;
-        out_tiles[n_tiles].x_span = current.x_hi - current.x_lo + 1;
-        out_tiles[n_tiles].y_span = current.y_hi - current.y_lo + 1;
+        /* Flush the last accumulated region. */
+        out[n_tiles].sheet_x_lo = cur.x_lo;
+        out[n_tiles].sheet_x_hi = cur.x_hi;
+        out[n_tiles].sheet_y_lo = cur.y_lo;
+        out[n_tiles].sheet_y_hi = cur.y_hi;
+        out[n_tiles].x_span     = cur.x_hi - cur.x_lo + 1;
+        out[n_tiles].y_span     = cur.y_hi - cur.y_lo + 1;
         return n_tiles + 1;
 
-    } else {  /* MERGE_2D */
-
+    } else { /* MERGE_2D */
+        /* Repeatedly merge any two intervals that overlap in both x and y
+         * until no more merges are possible.  O(n²) per pass, but n is
+         * small (one per defect) so this is acceptable. */
         int changed = 1;
         while (changed) {
             changed = 0;
-            for (int i = 0; i < n_intervals && !changed; i++) {
-                for (int j = i + 1; j < n_intervals && !changed; j++) {
-                    int x_overlap = (scratch_intervals[i].x_lo <= scratch_intervals[j].x_hi) &&
-                                    (scratch_intervals[j].x_lo <= scratch_intervals[i].x_hi);
-                    int y_overlap = (scratch_intervals[i].y_lo <= scratch_intervals[j].y_hi) &&
-                                    (scratch_intervals[j].y_lo <= scratch_intervals[i].y_hi);
+            for (int i = 0; i < n && !changed; i++) {
+                for (int j = i + 1; j < n && !changed; j++) {
+                    int x_overlap = (scratch[i].x_lo <= scratch[j].x_hi) &&
+                                    (scratch[j].x_lo <= scratch[i].x_hi);
+                    int y_overlap = (scratch[i].y_lo <= scratch[j].y_hi) &&
+                                    (scratch[j].y_lo <= scratch[i].y_hi);
                     if (x_overlap && y_overlap) {
-                        if (scratch_intervals[j].x_lo < scratch_intervals[i].x_lo)
-                            scratch_intervals[i].x_lo = scratch_intervals[j].x_lo;
-                        if (scratch_intervals[j].x_hi > scratch_intervals[i].x_hi)
-                            scratch_intervals[i].x_hi = scratch_intervals[j].x_hi;
-                        if (scratch_intervals[j].y_lo < scratch_intervals[i].y_lo)
-                            scratch_intervals[i].y_lo = scratch_intervals[j].y_lo;
-                        if (scratch_intervals[j].y_hi > scratch_intervals[i].y_hi)
-                            scratch_intervals[i].y_hi = scratch_intervals[j].y_hi;
-                        scratch_intervals[j] = scratch_intervals[--n_intervals];
+                        if (scratch[j].x_lo < scratch[i].x_lo) scratch[i].x_lo = scratch[j].x_lo;
+                        if (scratch[j].x_hi > scratch[i].x_hi) scratch[i].x_hi = scratch[j].x_hi;
+                        if (scratch[j].y_lo < scratch[i].y_lo) scratch[i].y_lo = scratch[j].y_lo;
+                        if (scratch[j].y_hi > scratch[i].y_hi) scratch[i].y_hi = scratch[j].y_hi;
+                        scratch[j] = scratch[--n]; /* fill gap with last element */
                         changed = 1;
                     }
                 }
             }
         }
-
-        for (int t = 0; t < n_intervals; t++) {
-            out_tiles[t].sheet_x_lo = scratch_intervals[t].x_lo;
-            out_tiles[t].sheet_x_hi = scratch_intervals[t].x_hi;
-            out_tiles[t].sheet_y_lo = scratch_intervals[t].y_lo;
-            out_tiles[t].sheet_y_hi = scratch_intervals[t].y_hi;
-            out_tiles[t].x_span     = scratch_intervals[t].x_hi - scratch_intervals[t].x_lo + 1;
-            out_tiles[t].y_span     = scratch_intervals[t].y_hi - scratch_intervals[t].y_lo + 1;
+        for (int t = 0; t < n; t++) {
+            out[t].sheet_x_lo = scratch[t].x_lo;
+            out[t].sheet_x_hi = scratch[t].x_hi;
+            out[t].sheet_y_lo = scratch[t].y_lo;
+            out[t].sheet_y_hi = scratch[t].y_hi;
+            out[t].x_span     = scratch[t].x_hi - scratch[t].x_lo + 1;
+            out[t].y_span     = scratch[t].y_hi - scratch[t].y_lo + 1;
         }
-        return n_intervals;
+        return n;
     }
 }
 
 
 /* =============================================================================
- * Strategy evaluator — dry run for one strategy, returns tiles and data count
+ * Strategy evaluator — dry-run for one merge strategy
+ *
+ * Calls build_tiles() for every (w, h) and accumulates total tile count
+ * and total data entries (sum of x_span × y_span across all tiles).
+ * Used by Phase B to compare the three merge strategies.
  * ============================================================================= */
-static void evaluate_strategy(int sheet_width, int sheet_height,
-                               const int32_t *defects, int n_defects,
-                               PositionInterval *interval_scratch,
-                               Tile *tile_scratch,
-                               MergeStrategy strategy,
-                               int *out_total_tiles,
-                               int64_t *out_total_data) {
+static void eval_strategy(int sheet_width, int sheet_height,
+                           const int32_t *defects, int n_defects,
+                           PositionInterval *scratch, Tile *tile_scratch,
+                           MergeStrategy strategy,
+                           int *out_total_tiles, int64_t *out_total_data) {
     int     total_tiles = 0;
     int64_t total_data  = 0;
 
     for (int w = 1; w <= sheet_width; w++) {
         for (int h = 1; h <= sheet_height; h++) {
-            int n = build_tiles_for_rect_size(w, h, sheet_width, sheet_height,
-                                              defects, n_defects,
-                                              interval_scratch, tile_scratch,
-                                              strategy);
+            int n = build_tiles(w, h, sheet_width, sheet_height,
+                                defects, n_defects, scratch, tile_scratch, strategy);
             total_tiles += n;
             for (int t = 0; t < n; t++)
                 total_data += (int64_t)tile_scratch[t].x_span * tile_scratch[t].y_span;
@@ -355,44 +325,86 @@ static void evaluate_strategy(int sheet_width, int sheet_height,
 
 
 /* =============================================================================
- * Phase 3 — Fd-table: optimal value for defected rectangles
+ * count_tile_local_defects / fill_tile_local_defects
  *
- * Builds the sparse FdSlab and fills it with a bottom-up DP. The slab stores
- * uint16 deltas (F[w][h] - Fd) rather than raw Fd values, halving the
- * memory footprint of the data[] array.
+ * Both functions test the same overlap condition: defect d "belongs" to a
+ * tile if the range of positions affected by d intersects the tile's
+ * sheet-position range.  Keeping the test in one place ensures that Pass
+ * C-1 (counting) and Pass C-2 (filling) always agree on which defects
+ * belong to which tile.
  *
- * Phases:
- *   A. Sort defects by x for consistent interval merging.
- *   B. Evaluate all three merge strategies in parallel, pick the best.
- *   C. Allocate tiles[], compute per-tile data offsets, build local defect
- *      lists for each tile. The first tile per (w,h) is stored inline in
- *      TileIndex; any additional tiles go into slab->tiles[] (overflow).
- *      has_tiles[] is set to 1 for every (w,h) that has at least one tile.
- *   D. Allocate flat data[] array (uint16).
- *   E. For each (w, h) bottom-up, iterate over tiles:
- *        - Pure positions (prefix-sum check) are pre-filled with delta 0.
- *        - Defected positions use Extended Normal Patterns (Zhang et al. 2023):
- *          Minkowski sum of reference points {0, defect edges} and normal cuts.
- *          The computed Fd value is converted to delta = pure_val - Fd and
- *          stored. An overflow flag in the slab is raised if delta exceeds
- *          UINT16_MAX so callers can detect and recover.
+ * count_tile_local_defects  returns the number of overlapping defects
+ * fill_tile_local_defects   writes their indices into dst[] (caller
+ *                           must provide space for n_defects entries)
+ * ============================================================================= */
+static int count_tile_local_defects(const Tile *tile, int w, int h,
+                                    const int32_t *defects, int n_defects) {
+    int count = 0;
+    for (int d = 0; d < n_defects; d++) {
+        DefectRef df = defect_at(defects, d);
+        int xl = defect_x_start(df) - w + 1, xh = defect_x_end(df)   - 1;
+        int yl = defect_y_start(df) - h + 1, yh = defect_y_end(df)   - 1;
+        if (!(tile->sheet_x_hi < xl || tile->sheet_x_lo > xh) &&
+            !(tile->sheet_y_hi < yl || tile->sheet_y_lo > yh))
+            count++;
+    }
+    return count;
+}
+
+static void fill_tile_local_defects(const Tile *tile, int w, int h,
+                                    const int32_t *defects, int n_defects,
+                                    int *dst) {
+    int count = 0;
+    for (int d = 0; d < n_defects; d++) {
+        DefectRef df = defect_at(defects, d);
+        int xl = defect_x_start(df) - w + 1, xh = defect_x_end(df)   - 1;
+        int yl = defect_y_start(df) - h + 1, yh = defect_y_end(df)   - 1;
+        if (!(tile->sheet_x_hi < xl || tile->sheet_x_lo > xh) &&
+            !(tile->sheet_y_hi < yl || tile->sheet_y_lo > yh))
+            dst[count++] = d;
+    }
+}
+
+
+/* =============================================================================
+ * Phase 3 — Fd-table: optimal value for defect-affected rectangles
  *
- * OpenMP parallelizes the (sx, sy) loop within each tile.
+ * Builds the sparse FdSlab and fills it with a bottom-up DP.
+ *
+ * Phase A  sort a working copy of the defect array by x for consistent
+ *          interval merging across all (w, h) iterations
+ *
+ * Phase B  evaluate all three merge strategies in parallel, pick the best:
+ *          - primary criterion: fewest tiles (drives slab_lookup cost)
+ *          - constraint: data size must not exceed min_data × 1.20
+ *
+ * Phase C  build the slab structure in two passes (see file header)
+ *          Pass C-1: tile geometry, data offsets, defect counts, pool offsets
+ *          Pass C-2: fill defect_pool[] with defect indices per tile
+ *
+ * Phase D  allocate flat data[] array (uint16 deltas)
+ *
+ * Phase E  bottom-up DP fill using Extended Normal Patterns (Zhang et al.
+ *          2023): for each defect-affected cell (w, h, sx, sy), build a set
+ *          of cut candidates from {0} ∪ {relative defect edges} offset by
+ *          every normal-pattern position, then try all candidate cuts and
+ *          store  delta = F[w][h] - best_Fd  as uint16.
+ *
+ *          OpenMP parallelises the (sx, sy) loop within each tile.
  * ============================================================================= */
 FdSlab *fill_Fd_slab(int sheet_width, int sheet_height,
-                     int32_t *defect_count_prefix,
-                     int32_t *F_values,
+                     int32_t *defect_count_prefix, int32_t *F_values,
                      int32_t *normal_cuts_x, int32_t *n_normal_cuts_x, int max_x_cuts,
                      int32_t *normal_cuts_y, int32_t *n_normal_cuts_y, int max_y_cuts,
                      int32_t *defect_array_in, int n_defects) {
 
     int col_stride = sheet_height + 1;
 
-    /* --- Phase A: work on a sorted copy of the defect array --- */
+    /* --- Phase A: sorted working copy of defects --- */
     int32_t *defects = (int32_t *)malloc(n_defects * DEFECT_FIELD_COUNT * sizeof(int32_t));
     memcpy(defects, defect_array_in, n_defects * DEFECT_FIELD_COUNT * sizeof(int32_t));
     if (n_defects > 1)
-        qsort(defects, n_defects, sizeof(int32_t) * DEFECT_FIELD_COUNT, compare_defects_by_x);
+        qsort(defects, n_defects, sizeof(int32_t) * DEFECT_FIELD_COUNT, cmp_defects_x);
 
     FdSlab *slab = (FdSlab *)calloc(1, sizeof(FdSlab));
     slab->sheet_width  = sheet_width;
@@ -402,327 +414,274 @@ FdSlab *fill_Fd_slab(int sheet_width, int sheet_height,
     slab->tile_index = (TileIndex *)calloc(index_size, sizeof(TileIndex));
     slab->has_tiles  = (uint8_t  *)calloc(index_size, sizeof(uint8_t));
 
-    /* --- Phase B: evaluate all 3 strategies, pick best ---
-     *
-     * Each strategy evaluation needs its own scratch buffers since
-     * build_tiles_for_rect_size mutates them. We allocate 3 independent
-     * sets and run them concurrently with OpenMP. */
-    const char *strategy_names[] = {"1D-x", "1D-y", "2D"};
-    MergeStrategy strategies[]   = {MERGE_1D_X, MERGE_1D_Y, MERGE_2D};
-    int     strat_tiles[3];
-    int64_t strat_data [3];
+    /* --- Phase B: select best merge strategy --- */
+    const char    *strategy_names[] = {"1D-x", "1D-y", "2D"};
+    MergeStrategy  strategies[]     = {MERGE_1D_X, MERGE_1D_Y, MERGE_2D};
+    int     n_tiles_per_strategy[3];
+    int64_t n_data_per_strategy[3];
 
-    PositionInterval *interval_scratches[3];
-    Tile             *tile_scratches[3];
-
+    /* Each strategy evaluation needs its own scratch buffers (build_tiles
+     * mutates them), so allocate three independent sets and run in parallel. */
+    PositionInterval *iv_scratch[3];
+    Tile             *t_scratch[3];
     for (int s = 0; s < 3; s++) {
-        interval_scratches[s] = (PositionInterval *)malloc(n_defects * sizeof(PositionInterval));
-        tile_scratches[s]     = (Tile *)malloc(n_defects * sizeof(Tile));
+        iv_scratch[s] = (PositionInterval *)malloc(n_defects * sizeof(PositionInterval));
+        t_scratch[s]  = (Tile *)malloc(n_defects * sizeof(Tile));
     }
 
     #pragma omp parallel for schedule(static)
     for (int s = 0; s < 3; s++)
-        evaluate_strategy(sheet_width, sheet_height, defects, n_defects,
-                          interval_scratches[s], tile_scratches[s], strategies[s],
-                          &strat_tiles[s], &strat_data[s]);
+        eval_strategy(sheet_width, sheet_height, defects, n_defects,
+                      iv_scratch[s], t_scratch[s], strategies[s],
+                      &n_tiles_per_strategy[s], &n_data_per_strategy[s]);
 
-    /* Free scratch sets we won't reuse (keep set 0 for Phase C). */
-    free(interval_scratches[1]); free(tile_scratches[1]);
-    free(interval_scratches[2]); free(tile_scratches[2]);
-
-    PositionInterval *interval_scratch = interval_scratches[0];
-    Tile             *tile_scratch     = tile_scratches[0];
+    /* Keep only strategy 0's scratch buffers for Phase C; free the rest. */
+    free(iv_scratch[1]); free(t_scratch[1]);
+    free(iv_scratch[2]); free(t_scratch[2]);
 
     fprintf(stderr, "Tile strategy comparison:\n");
     for (int s = 0; s < 3; s++)
         fprintf(stderr, "  %-4s  tiles=%d  data=%lld  (%.1f MB)\n",
                 strategy_names[s],
-                strat_tiles[s],
-                (long long)strat_data[s],
-                strat_data[s] * 4.0 / 1024.0 / 1024.0);
+                n_tiles_per_strategy[s],
+                (long long)n_data_per_strategy[s],
+                n_data_per_strategy[s] * 4.0 / 1024.0 / 1024.0);
 
-    /* Pick best strategy:
-     * Primary criterion: fewest tiles (drives slab_lookup cost).
-     * Constraint: data must not exceed min_data * memory_tolerance. */
-    int64_t min_data = strat_data[0];
+    /* Pick the strategy with the fewest tiles whose data size is within
+     * 20% of the global minimum.  Fewest tiles minimises slab_lookup cost
+     * since it reduces the per-lookup tile scan.  The 20% tolerance
+     * prevents choosing a strategy with many tiles just to save a little
+     * memory. */
+    int64_t min_data = n_data_per_strategy[0];
     for (int s = 1; s < 3; s++)
-        if (strat_data[s] < min_data) min_data = strat_data[s];
-
-    const double memory_tolerance = 1.20;
+        if (n_data_per_strategy[s] < min_data) min_data = n_data_per_strategy[s];
 
     int best = -1;
     for (int s = 0; s < 3; s++) {
-        if (strat_data[s] > (int64_t)(min_data * memory_tolerance))
-            continue;
-        if (best == -1 || strat_tiles[s] < strat_tiles[best])
+        if (n_data_per_strategy[s] > (int64_t)(min_data * 1.20)) continue;
+        if (best == -1 || n_tiles_per_strategy[s] < n_tiles_per_strategy[best])
             best = s;
     }
-    if (best == -1) {
+    if (best == -1) { /* all strategies exceed tolerance — fall back to min data */
         best = 0;
         for (int s = 1; s < 3; s++)
-            if (strat_data[s] < strat_data[best]) best = s;
+            if (n_data_per_strategy[s] < n_data_per_strategy[best]) best = s;
     }
 
     fprintf(stderr, "  -> selected: %s\n", strategy_names[best]);
     MergeStrategy chosen = strategies[best];
 
-    /* --- Phase C: allocate overflow tiles[], assign offsets, build local
-     *              defect lists for each tile.
+    /* --- Phase C, Pass 1: tile geometry, data offsets, defect counts ---
      *
-     * Tile layout change vs. original:
-     *   - The first tile for each (w,h) is stored inline in TileIndex
-     *     (first_tile_inline). No entry in slab->tiles[] is allocated for it.
-     *   - Additional tiles (tile_count > 1) are stored in slab->tiles[]
-     *     starting at overflow_start, with (tile_count - 1) entries each.
+     * For each (w, h) that has at least one tile:
+     *   - build tile geometry with build_tiles() and store it in
+     *     tile_index[] and tiles[]
+     *   - assign each tile's data_offset (its slice of the future data[])
+     *   - count how many defects overlap each tile (n_local_defects)
+     *   - record defect_pool_start = running total of defect entries so far
      *
-     * has_tiles[wh_idx] is set to 1 for every (w,h) that has >= 1 tile.
-     *
-     * Two-pass approach:
-     *   Pass 1: count overflow tiles to size slab->tiles[].
-     *   Pass 2: fill tile_index[] and tiles[].
-     *
-     * We avoid a separate counting pass by building a temporary flat array
-     * of (tile_count, tiles[]) per (w,h) during the single Phase B re-run,
-     * then distributing into the slab. Instead, simpler: do one pass that
-     * fills inline + a dynamic overflow array, then compact.
-     *
-     * Implementation: single pass. We maintain overflow_cursor into
-     * slab->tiles[]. We pre-size slab->tiles[] to strat_tiles[best] as an
-     * upper bound on overflow (conservative: actual overflow = total_tiles -
-     * number_of_wh_pairs_with_tiles, since one tile per pair is inlined).
-     * -------------------------------------------------------------------- */
-    int total_tiles = strat_tiles[best];
+     * No memory is allocated for defect lists here; that happens after this
+     * pass once the total entry count is known. */
+    slab->tiles = (Tile *)calloc(n_tiles_per_strategy[best], sizeof(Tile));
 
-    /* Upper bound: at most (total_tiles) overflow entries (when every (w,h)
-     * has exactly 1 tile there are 0 overflow entries; worst case all pairs
-     * have 2+ tiles giving total_tiles - n_pairs_with_tiles overflow). */
-    slab->tiles = (Tile *)calloc(total_tiles, sizeof(Tile));
-    slab->total_tile_count = 0;  /* actual overflow count, filled below */
-
-    int     overflow_cursor = 0;
-    int64_t data_total      = 0;
+    int     overflow_cursor      = 0; /* next free slot in slab->tiles[]   */
+    int64_t data_total           = 0; /* total elements needed in data[]   */
+    int64_t total_defect_entries = 0; /* total entries needed in defect_pool[] */
 
     for (int w = 1; w <= sheet_width; w++) {
         for (int h = 1; h <= sheet_height; h++) {
-
-            int wh_idx = w * col_stride + h;
-
-            int n_tiles = build_tiles_for_rect_size(w, h, sheet_width, sheet_height,
-                                                    defects, n_defects,
-                                                    interval_scratch, tile_scratch,
-                                                    chosen);
-
+            int wh_idx  = w * col_stride + h;
+            int n_tiles = build_tiles(w, h, sheet_width, sheet_height,
+                                      defects, n_defects,
+                                      iv_scratch[0], t_scratch[0], chosen);
             if (n_tiles == 0) continue;
 
-            /* Mark this (w,h) as having tiles — enables the fast path in
-             * slab_lookup to skip tile_index[] entirely for pure pairs.  */
-            slab->has_tiles[wh_idx] = 1;
+            slab->has_tiles[wh_idx]         = 1;
+            TileIndex *ti                   = &slab->tile_index[wh_idx];
+            ti->tile_count                  = n_tiles;
 
-            TileIndex *ti   = &slab->tile_index[wh_idx];
-            ti->tile_count  = n_tiles;
-
-            /* Helper lambda (as a local function via a nested loop) to build
-             * the local defect list for one tile and assign its data_offset. */
             for (int t = 0; t < n_tiles; t++) {
-                tile_scratch[t].data_offset = data_total;
-                data_total += (int64_t)tile_scratch[t].x_span * tile_scratch[t].y_span;
+                t_scratch[0][t].data_offset      = data_total;
+                data_total += (int64_t)t_scratch[0][t].x_span * t_scratch[0][t].y_span;
 
-                int *local_list  = (int *)malloc(n_defects * sizeof(int));
-                int  local_count = 0;
-
-                for (int d = 0; d < n_defects; d++) {
-                    DefectRef def = defect_at(defects, d);
-                    int def_x_lo = defect_x_start(def) - w + 1;
-                    int def_x_hi = defect_x_end(def)   - 1;
-                    int def_y_lo = defect_y_start(def) - h + 1;
-                    int def_y_hi = defect_y_end(def)   - 1;
-
-                    int overlaps_x = !(tile_scratch[t].sheet_x_hi < def_x_lo ||
-                                       tile_scratch[t].sheet_x_lo > def_x_hi);
-                    int overlaps_y = !(tile_scratch[t].sheet_y_hi < def_y_lo ||
-                                       tile_scratch[t].sheet_y_lo > def_y_hi);
-
-                    if (overlaps_x && overlaps_y)
-                        local_list[local_count++] = d;
-                }
-
-                if (local_count > 0) {
-                    tile_scratch[t].local_defect_indices =
-                        (int *)realloc(local_list, local_count * sizeof(int));
-                    tile_scratch[t].n_local_defects = local_count;
-                } else {
-                    free(local_list);
-                    tile_scratch[t].local_defect_indices = NULL;
-                    tile_scratch[t].n_local_defects      = 0;
-                }
+                int lc = count_tile_local_defects(
+                    &t_scratch[0][t], w, h, defects, n_defects);
+                t_scratch[0][t].n_local_defects   = lc;
+                t_scratch[0][t].defect_pool_start = (int32_t)total_defect_entries;
+                total_defect_entries += lc;
             }
 
-            /* Store tile 0 inline in TileIndex. */
-            ti->first_tile_inline = tile_scratch[0];
-
-            /* Store tiles 1..n_tiles-1 in the overflow array. */
+            /* Store tile 0 inline in the TileIndex; remaining tiles go
+             * into the overflow array slab->tiles[]. */
+            ti->first_tile_inline = t_scratch[0][0];
             if (n_tiles > 1) {
                 ti->overflow_start = overflow_cursor;
                 for (int t = 1; t < n_tiles; t++)
-                    slab->tiles[overflow_cursor++] = tile_scratch[t];
+                    slab->tiles[overflow_cursor++] = t_scratch[0][t];
             }
         }
     }
-
     slab->total_tile_count   = overflow_cursor;
     slab->total_data_entries = data_total;
     slab->overflow           = 0;
 
-    /* --- Phase D: allocate flat data array (uint16 deltas) --- */
+    /* --- Allocate the defect-index arena ---
+     *
+     * One allocation replaces the ~1800 per-tile mallocs of the original
+     * design.  Each tile's defect list is a contiguous slice of this array
+     * starting at defect_pool[tile->defect_pool_start]. */
+    slab->defect_pool = (int *)malloc(total_defect_entries * sizeof(int));
+
+    /* --- Phase C, Pass 2: fill the defect-index arena ---
+     *
+     * Tile geometry is already stored in tile_index[] and tiles[] from
+     * Pass 1, so build_tiles() is not called again.  We only need w and h
+     * to recompute the defect overlap bounds. */
+    for (int w = 1; w <= sheet_width; w++) {
+        for (int h = 1; h <= sheet_height; h++) {
+            int wh_idx = w * col_stride + h;
+            if (!slab->has_tiles[wh_idx]) continue;
+
+            TileIndex *ti = &slab->tile_index[wh_idx];
+            for (int t = 0; t < ti->tile_count; t++) {
+                Tile *tile = (t == 0)
+                    ? &ti->first_tile_inline
+                    : &slab->tiles[ti->overflow_start + t - 1];
+                if (tile->n_local_defects > 0)
+                    fill_tile_local_defects(
+                        tile, w, h, defects, n_defects,
+                        slab->defect_pool + tile->defect_pool_start);
+            }
+        }
+    }
+
+    /* --- Phase D: allocate delta array --- */
     slab->data = (uint16_t *)malloc(data_total * sizeof(uint16_t));
 
     /* --- Phase E: bottom-up DP fill ---
      *
-     * For each (w, h) in bottom-up order, iterate over tiles.
-     * OpenMP parallelizes (sx, sy) within each tile.
+     * For each (w, h) that has tiles, iterate over its tiles and over
+     * all sheet positions (sx, sy) within each tile.
      *
-     * Cut candidates use Extended Normal Patterns (Zhang et al. 2023):
-     * For each reference point rp in {0} ∪ {relative defect edges},
-     * try cuts at rp + z for every normal-pattern position z.
-     *   rp=0          → plain normal cuts
-     *   rp=edge, z=0  → plain defect-edge cuts
-     *   rp=edge, z>0  → extended cuts needed for optimality
+     * Pure positions (defect_count_in_rect == 0) are pre-filled with
+     * delta = 0 (meaning Fd == F) and skipped.
      *
-     * Boolean masks deduplicate positions so each cut is evaluated once.
-     * Stack arrays sized to sheet dimensions are safe for all practical
-     * sheet sizes and compatible with OpenMP.
+     * Defect-affected positions use Extended Normal Patterns (Zhang et al.
+     * 2023).  Reference points are {0} ∪ {relative left/right/bot/top
+     * edges of each local defect}.  Cut candidates are all positions
+     * rp + z for every reference point rp and every normal-pattern
+     * position z.  Boolean masks (x_mask, y_mask) deduplicate candidates
+     * so each cut position is evaluated exactly once.
      *
-     * Tile iteration uses the same two-level layout as Phase C:
-     *   tile 0  → ti->first_tile_inline
-     *   tiles 1..N-1 → slab->tiles[ti->overflow_start + 0..N-2]
-     */
+     * defect_pool is cached in a local pointer before the loops so the
+     * compiler can keep it in a register through the inner tile iteration.
+     * The five FdSlab pointer fields (has_tiles, tile_index, data, tiles,
+     * sheet_height) are accessed through slab_lookup(), which is inline
+     * and already visible to the optimiser from solver_core.h. */
+    const int *const defect_pool = slab->defect_pool;
+
+    /* --- Phase E: Fixed & Optimized DP Fill --- */
     for (int w = 1; w <= sheet_width; w++) {
-
-        int n_x_cuts   = n_normal_cuts_x[w];
-        int x_cut_base = w * max_x_cuts;
-        int wh_base    = w * col_stride;
-
+        int nxc = n_normal_cuts_x[w], xcb = w * max_x_cuts, wbase = w * col_stride;
         for (int h = 1; h <= sheet_height; h++) {
-
-            int wh_idx = wh_base + h;
-
-            /* Skip pure (w,h) pairs entirely — nothing to fill. */
+            int wh_idx = wbase + h;
             if (!slab->has_tiles[wh_idx]) continue;
 
-            int n_y_cuts   = n_normal_cuts_y[h];
-            int y_cut_base = h * max_y_cuts;
+            int nyc = n_normal_cuts_y[h], ycb = h * max_y_cuts;
+            TileIndex *ti = &slab->tile_index[wh_idx];
+            int32_t pure_val = F_values[wh_idx];
 
-            TileIndex *ti       = &slab->tile_index[wh_idx];
-            int32_t    pure_val = F_values[wh_idx];
-
-            /* Iterate over all tiles for this (w,h).
-             * t=0: inline tile; t=1..N-1: overflow tiles. */
             for (int t = 0; t < ti->tile_count; t++) {
+                Tile *tile = (t == 0) ? &ti->first_tile_inline : &slab->tiles[ti->overflow_start + t - 1];
+                int x_span = tile->x_span, y_span = tile->y_span;
+                uint16_t *tdata = &slab->data[tile->data_offset];
 
-                Tile *tile = (t == 0)
-                    ? &ti->first_tile_inline
-                    : &slab->tiles[ti->overflow_start + t - 1];
+                #pragma omp parallel
+                {
+                    // Thread-local scratch to store best values for the current SX column
+                    int32_t *col_best = (int32_t *)alloca(y_span * sizeof(int32_t));
+                    uint8_t *is_impure = (uint8_t *)alloca(y_span * sizeof(uint8_t));
+                    uint8_t *x_mask = (uint8_t *)alloca((w + 1) * sizeof(uint8_t));
+                    uint8_t *y_mask = (uint8_t *)alloca((h + 1) * sizeof(uint8_t));
 
-                uint16_t *tile_data = &slab->data[tile->data_offset];
+                    #pragma omp for schedule(dynamic, 1)
+                    for (int sx = tile->sheet_x_lo; sx <= tile->sheet_x_hi; sx++) {
+                        int lx = sx - tile->sheet_x_lo;
+                        int impure_count = 0;
 
-                #pragma omp parallel for schedule(dynamic, 16) collapse(2)
-                for (int sx = tile->sheet_x_lo; sx <= tile->sheet_x_hi; sx++) {
-                    for (int sy = tile->sheet_y_lo; sy <= tile->sheet_y_hi; sy++) {
-
-                        /* O(1) purity check via 2D prefix sum.
-                         * Pure cell → Fd == pure_val → delta == 0. */
-                        int32_t n_defects_here = defect_count_in_rect(
-                            defect_count_prefix, col_stride,
-                            sx, sy, sx + w, sy + h);
-
-                        if (n_defects_here == 0) {
-                            int local_x = sx - tile->sheet_x_lo;
-                            int local_y = sy - tile->sheet_y_lo;
-                            tile_data[(int64_t)local_x * tile->y_span + local_y] = 0;
-                            continue;
+                        // 1. Identify impure cells and set delta=0 for pure ones (Restore Correctness)
+                        for (int ly = 0; ly < y_span; ly++) {
+                            int sy = tile->sheet_y_lo + ly;
+                            if (defect_count_in_rect(defect_count_prefix, col_stride, sx, sy, sx + w, sy + h) == 0) {
+                                tdata[(int64_t)lx * y_span + ly] = 0;
+                                is_impure[ly] = 0;
+                            } else {
+                                is_impure[ly] = 1;
+                                col_best[ly] = 0;
+                                impure_count++;
+                            }
                         }
+                        if (impure_count == 0) continue;
 
-                        int32_t best_value = 0;
-
-                        uint8_t x_mask[sheet_width + 1];
-                        uint8_t y_mask[sheet_height + 1];
+                        // 2. Prepare X-Mask for this SX
                         memset(x_mask, 0, (w + 1) * sizeof(uint8_t));
-                        memset(y_mask, 0, (h + 1) * sizeof(uint8_t));
-
-                        int rp_x[2 * tile->n_local_defects + 2];
-                        int rp_y[2 * tile->n_local_defects + 2];
-                        int n_rp_x = 0, n_rp_y = 0;
-
-                        rp_x[n_rp_x++] = 0;
-                        rp_y[n_rp_y++] = 0;
-
+                        const int *local_idx = slab->defect_pool + tile->defect_pool_start;
                         for (int li = 0; li < tile->n_local_defects; li++) {
-                            DefectRef def = defect_at(defects,
-                                tile->local_defect_indices[li]);
-                            int left  = defect_x_start(def) - sx;
-                            int right = defect_x_end(def)   - sx;
-                            int bot   = defect_y_start(def) - sy;
-                            int top   = defect_y_end(def)   - sy;
-                            if (left  >= 0 && left  <= w) rp_x[n_rp_x++] = left;
-                            if (right >= 0 && right <= w) rp_x[n_rp_x++] = right;
-                            if (bot   >= 0 && bot   <= h) rp_y[n_rp_y++] = bot;
-                            if (top   >= 0 && top   <= h) rp_y[n_rp_y++] = top;
+                            DefectRef def = defect_at(defects, local_idx[li]);
+                            int left = defect_x_start(def) - sx, right = defect_x_end(def) - sx;
+                            if (left > 0 && left < w) x_mask[left] = 1;
+                            if (right > 0 && right < w) x_mask[right] = 1;
+                        }
+                        for (int ci = 0; ci < nxc; ci++) {
+                            int z_nc = normal_cuts_x[xcb + ci];
+                            if (z_nc > 0 && z_nc < w) x_mask[z_nc] = 1;
                         }
 
-                        for (int ri = 0; ri < n_rp_x; ri++) {
-                            int rp = rp_x[ri];
-                            if (rp > 0 && rp < w) x_mask[rp] = 1;
-                            for (int ci = 0; ci < n_x_cuts; ci++) {
-                                int z = rp + normal_cuts_x[x_cut_base + ci];
-                                if (z > 0 && z < w) x_mask[z] = 1;
-                            }
-                        }
-
-                        for (int ri = 0; ri < n_rp_y; ri++) {
-                            int rp = rp_y[ri];
-                            if (rp > 0 && rp < h) y_mask[rp] = 1;
-                            for (int ci = 0; ci < n_y_cuts; ci++) {
-                                int z = rp + normal_cuts_y[y_cut_base + ci];
-                                if (z > 0 && z < h) y_mask[z] = 1;
-                            }
-                        }
-
+                        // 3. Vertical Cuts: Iterate Z outside LY for L3 Efficiency
                         for (int z = 1; z < w; z++) {
                             if (!x_mask[z]) continue;
-                            int32_t combined =
-                                slab_lookup(slab, F_values, col_stride,
-                                            z,     h, sx,     sy)
-                              + slab_lookup(slab, F_values, col_stride,
-                                            w - z, h, sx + z, sy);
-                            if (combined > best_value) best_value = combined;
+                            for (int ly = 0; ly < y_span; ly++) {
+                                if (!is_impure[ly]) continue;
+                                int sy = tile->sheet_y_lo + ly;
+                                int32_t v = slab_lookup(slab, F_values, col_stride, z, h, sx, sy)
+                                        + slab_lookup(slab, F_values, col_stride, w - z, h, sx + z, sy);
+                                if (v > col_best[ly]) col_best[ly] = v;
+                            }
                         }
 
-                        for (int z = 1; z < h; z++) {
-                            if (!y_mask[z]) continue;
-                            int32_t combined =
-                                slab_lookup(slab, F_values, col_stride,
-                                            w, z,     sx, sy)
-                              + slab_lookup(slab, F_values, col_stride,
-                                            w, h - z, sx, sy + z);
-                            if (combined > best_value) best_value = combined;
-                        }
+                        // 4. Horizontal Cuts: SY is already outer, keep Z inner
+                        for (int ly = 0; ly < y_span; ly++) {
+                            if (!is_impure[ly]) continue;
+                            int sy = tile->sheet_y_lo + ly;
+                            
+                            memset(y_mask, 0, (h + 1) * sizeof(uint8_t));
+                            for (int li = 0; li < tile->n_local_defects; li++) {
+                                DefectRef def = defect_at(defects, local_idx[li]);
+                                int bot = defect_y_start(def) - sy, top = defect_y_end(def) - sy;
+                                if (bot > 0 && bot < h) y_mask[bot] = 1;
+                                if (top > 0 && top < h) y_mask[top] = 1;
+                            }
+                            for (int ci = 0; ci < nyc; ci++) {
+                                int z_nc = normal_cuts_y[ycb + ci];
+                                if (z_nc > 0 && z_nc < h) y_mask[z_nc] = 1;
+                            }
 
-                        int local_x = sx - tile->sheet_x_lo;
-                        int local_y = sy - tile->sheet_y_lo;
+                            for (int z = 1; z < h; z++) {
+                                if (!y_mask[z]) continue;
+                                int32_t v = slab_lookup(slab, F_values, col_stride, w, z, sx, sy)
+                                        + slab_lookup(slab, F_values, col_stride, w, h - z, sx, sy + z);
+                                if (v > col_best[ly]) col_best[ly] = v;
+                            }
 
-                        /* Store delta = pure_val - best_value.
-                         * delta >= 0 always (Fd <= F).
-                         * delta may exceed UINT16_MAX for problems with very
-                         * large F values (total items area > 65535). We set a
-                         * flag; Python will raise rather than silently return
-                         * a truncated, incorrect result. */
-                        int32_t delta = pure_val - best_value;
-                        if (delta > (int32_t)UINT16_MAX) {
-                            #pragma omp atomic write
-                            slab->overflow = 1;
+                            // 5. Final Write
+                            int32_t delta = pure_val - col_best[ly];
+                            if (delta > (int32_t)UINT16_MAX) {
+                                #pragma omp atomic write
+                                slab->overflow = 1;
+                                delta = UINT16_MAX;
+                            }
+                            tdata[(int64_t)lx * y_span + ly] = (uint16_t)delta;
                         }
-                        tile_data[(int64_t)local_x * tile->y_span + local_y] =
-                            (uint16_t)delta;
                     }
                 }
             }
@@ -730,12 +689,18 @@ FdSlab *fill_Fd_slab(int sheet_width, int sheet_height,
     }
 
     free(defects);
-    free(interval_scratch);
-    free(tile_scratch);
+    free(iv_scratch[0]);
+    free(t_scratch[0]);
     return slab;
 }
 
 
+/* =============================================================================
+ * estimate_slab — dry run: report tile and data counts for all strategies
+ *
+ * Evaluates all three merge strategies without building the actual slab.
+ * Used by the Python layer to preview memory usage before committing.
+ * ============================================================================= */
 SlabEstimate estimate_slab(int sheet_width, int sheet_height,
                            int32_t *defect_array_in, int n_defects) {
 
@@ -745,26 +710,22 @@ SlabEstimate estimate_slab(int sheet_width, int sheet_height,
            n_defects * DEFECT_FIELD_COUNT * sizeof(int32_t));
     if (n_defects > 1)
         qsort(defects, n_defects,
-              sizeof(int32_t) * DEFECT_FIELD_COUNT, compare_defects_by_x);
+              sizeof(int32_t) * DEFECT_FIELD_COUNT, cmp_defects_x);
 
-    PositionInterval *interval_scratch =
-        (PositionInterval *)malloc(n_defects * sizeof(PositionInterval));
-    Tile *tile_scratch =
-        (Tile *)malloc(n_defects * sizeof(Tile));
+    PositionInterval *iv = (PositionInterval *)malloc(
+        n_defects * sizeof(PositionInterval));
+    Tile *ts = (Tile *)malloc(n_defects * sizeof(Tile));
 
     SlabEstimate est;
-    evaluate_strategy(sheet_width, sheet_height, defects, n_defects,
-                      interval_scratch, tile_scratch, MERGE_1D_X,
-                      &est.tiles_1dx, &est.data_1dx);
-    evaluate_strategy(sheet_width, sheet_height, defects, n_defects,
-                      interval_scratch, tile_scratch, MERGE_1D_Y,
-                      &est.tiles_1dy, &est.data_1dy);
-    evaluate_strategy(sheet_width, sheet_height, defects, n_defects,
-                      interval_scratch, tile_scratch, MERGE_2D,
-                      &est.tiles_2d, &est.data_2d);
+    eval_strategy(sheet_width, sheet_height, defects, n_defects, iv, ts,
+                  MERGE_1D_X, &est.tiles_1dx, &est.data_1dx);
+    eval_strategy(sheet_width, sheet_height, defects, n_defects, iv, ts,
+                  MERGE_1D_Y, &est.tiles_1dy, &est.data_1dy);
+    eval_strategy(sheet_width, sheet_height, defects, n_defects, iv, ts,
+                  MERGE_2D,   &est.tiles_2d,  &est.data_2d);
 
     free(defects);
-    free(interval_scratch);
-    free(tile_scratch);
+    free(iv);
+    free(ts);
     return est;
 }

@@ -19,7 +19,7 @@
 #define SOLVER_CORE_H
 
 #include <stdint.h>
-#include <stdlib.h>   /* UINT16_MAX via <stdint.h> on most systems, but be safe */
+#include <stdlib.h>
 
 
 /* =============================================================================
@@ -36,29 +36,24 @@
 /* =============================================================================
  * Defect record layout
  *
- * The defect array is a flat int32_t buffer. Each defect occupies
+ * The defect array is a flat int32_t buffer.  Each defect occupies
  * DEFECT_FIELD_COUNT consecutive entries in this order:
  *   [0] x_start  — left edge of the bounding box
  *   [1] y_start  — bottom edge
  *   [2] width
  *   [3] height
- *   [4] x_end    — right edge  (exclusive, i.e. x_start + width)
- *   [5] y_end    — top edge    (exclusive, i.e. y_start + height)
+ *   [4] x_end    — right edge  (exclusive: x_start + width)
+ *   [5] y_end    — top edge    (exclusive: y_start + height)
  *
- * Use the DefectRef helper below instead of indexing the raw array directly.
+ * Use the DefectRef helpers below instead of indexing the raw array directly.
  * ============================================================================= */
 #define DEFECT_FIELD_COUNT 6
 
-typedef struct {
-    const int32_t *fields;
-} DefectRef;
+typedef struct { const int32_t *fields; } DefectRef;
 
-static inline DefectRef defect_at(const int32_t *defect_array, int index) {
-    DefectRef ref;
-    ref.fields = defect_array + index * DEFECT_FIELD_COUNT;
-    return ref;
+static inline DefectRef defect_at(const int32_t *arr, int idx) {
+    DefectRef r; r.fields = arr + idx * DEFECT_FIELD_COUNT; return r;
 }
-
 static inline int defect_x_start(DefectRef d) { return d.fields[0]; }
 static inline int defect_y_start(DefectRef d) { return d.fields[1]; }
 static inline int defect_width  (DefectRef d) { return d.fields[2]; }
@@ -73,8 +68,7 @@ static inline int defect_y_end  (DefectRef d) { return d.fields[5]; }
  * prefix is a (sheet_width+1) × (sheet_height+1) array in row-major order.
  * Returns the number of defect pixels in the rectangle [x0, x1) × [y0, y1).
  *
- * This is the standard inclusion-exclusion formula for 2D prefix sums:
- *   count = P[x1][y1] - P[x0][y1] - P[x1][y0] + P[x0][y0]
+ * Standard inclusion-exclusion: P[x1][y1] - P[x0][y1] - P[x1][y0] + P[x0][y0]
  * ============================================================================= */
 static inline int32_t defect_count_in_rect(const int32_t *prefix, int stride,
                                            int x0, int y0, int x1, int y1) {
@@ -89,97 +83,111 @@ static inline int32_t defect_count_in_rect(const int32_t *prefix, int stride,
  * Sparse Fd storage — multi-tile slab with uint16 delta encoding
  *
  * The 4D table Fd(w, h, x, y) gives the optimal value for a defected
- * rectangle of size w×h whose bottom-left corner is at sheet position (x, y).
+ * rectangle of size w×h placed at sheet position (x, y).
  *
- * A naive dense array of shape (W+1)^2 × (H+1)^2 is prohibitively large.
- * Key observation: only positions (x, y) where the rectangle [x, x+w) × [y, y+h)
- * overlaps at least one defect need to be stored — all other positions equal
- * F_values[w][h] (the pure-rectangle answer).
+ * Only positions where the rectangle overlaps at least one defect need
+ * explicit storage — all other positions equal F_values[w][h] and are
+ * recovered without a table lookup.
  *
- * We represent the affected region for each (w, h) as a set of disjoint
- * rectangular "tiles" covering only the defect-affected positions. All tile
- * data is packed into one flat uint16_t array. A TileIndex entry tells us
- * which slice of the tiles[] array belongs to a given (w, h).
+ * TILES
+ *   For each (w, h) pair, the affected region is represented as a small
+ *   set of disjoint rectangular tiles.  Each tile covers a contiguous
+ *   sub-range of (x, y) positions and owns a slice of the flat data[]
+ *   array.  The tile index (TileIndex) for each (w, h) is stored in a
+ *   flat array of size (sheet_width+1) × (sheet_height+1).
  *
- * DELTA ENCODING:
- *   data[i] holds  delta = F_values[w][h] - Fd(w, h, x, y)   as uint16.
- * Since Fd <= F always, delta is >= 0 and fits in uint16 as long as the
- * difference never exceeds 65535. For all benchmark problems at
- * dimensions used by the project (up to ~200×200 total area), the delta
- * stays well within uint16. The FdSlab.overflow flag is set if a write
- * would exceed UINT16_MAX; callers should treat the slab as invalid in
- * that case and fall back to a wider encoding.
+ * DELTA ENCODING
+ *   data[i]  =  F_values[w][h] - Fd(w, h, x, y)   as uint16.
+ *   Since Fd <= F always, delta >= 0.  FdSlab.overflow is set if any
+ *   delta exceeds UINT16_MAX; callers should treat the slab as invalid.
  *
- * LOOKUP OPTIMIZATIONS:
- *   1. has_tiles[] — a flat uint8 array, same shape as tile_index[], set to 1
- *      iff the (w,h) pair has at least one tile. Checked first in slab_lookup
- *      so that pure (w,h) pairs return F_values[w][h] without touching
- *      tile_index[] or tiles[] at all, improving cache behaviour for the
- *      majority of lookups which are pure.
+ * DEFECT-INDEX ARENA  (stack-pool pattern)
+ *   Each tile needs a small list of which defects overlap it (used during
+ *   Phase 3 fill to build Extended Normal Pattern cut candidates).
  *
- *   2. Inlined first tile — TileIndex embeds a copy of the first Tile struct
- *      directly (valid when tile_count >= 1). For the common single-tile case
- *      this eliminates the second pointer dereference into tiles[], turning
- *      the hot path from three cache misses (tile_index → tiles → data) into
- *      two (tile_index → data).  When tile_count > 1 the remaining tiles are
- *      still stored in tiles[] starting at overflow_start.
+ *   Old design: each Tile owned a separately malloc'd int[] pointed to by
+ *   local_defect_indices — ~1800 tiny scattered heap allocations.
+ *
+ *   New design: one flat int[] arena (FdSlab.defect_pool) holds ALL
+ *   local-defect lists for every tile.  Each Tile stores only a 4-byte
+ *   int32_t offset (defect_pool_start) instead of an 8-byte pointer.
+ *   Access:  defect_pool[tile->defect_pool_start + li]
+ *
+ *   Benefits:
+ *     - ~1800 malloc/realloc/free calls → 1
+ *     - All lists contiguous in memory → better hardware prefetching
+ *     - Tile struct 4 bytes smaller; TileIndex shrinks by same amount
+ *     - Phase E hot path: one indexed load (pool base in register)
+ *       instead of pointer-dereference + indexed load
+ *     - Free is trivial: free(slab->defect_pool) once at slab teardown
+ *
+ * LOOKUP OPTIMIZATIONS
+ *   has_tiles[] — checked first; pure (w,h) pairs return F_values[w][h]
+ *   without touching tile_index[] or data[].
+ *
+ *   Inlined first tile — TileIndex embeds one Tile directly.  Single-tile
+ *   (w,h) pairs (the common case) need only one indirection to reach
+ *   tile bounds, then one more for data[].  Overflow tiles (tile_count > 1)
+ *   are stored in the separate FdSlab.tiles[] overflow array.
  * ============================================================================= */
 
+/* Tile — one rectangular region of affected (x, y) positions for a
+ * given (w, h) pair.
+ *
+ * defect_pool_start  offset into FdSlab.defect_pool[] where this tile's
+ *                    local-defect list begins.  Length = n_local_defects.
+ *                    Access: defect_pool[tile->defect_pool_start + li]
+ *
+ * n_local_defects    number of defects that overlap this tile (may be 0).
+ */
 typedef struct {
-    int     sheet_x_lo, sheet_x_hi;
-    int     sheet_y_lo, sheet_y_hi;
-    int     x_span, y_span;
-    int64_t data_offset;
-    int    *local_defect_indices;
-    int     n_local_defects;
+    int      sheet_x_lo, sheet_x_hi;
+    int      sheet_y_lo, sheet_y_hi;
+    int      x_span, y_span;
+    int64_t  data_offset;
+    int32_t  defect_pool_start;   /* offset into FdSlab.defect_pool[]     */
+    int32_t  n_local_defects;     /* length of this tile's defect list    */
 } Tile;
 
-/* TileIndex — one entry per (w, h) pair in the (sheet_width+1)*(sheet_height+1)
- * index array.
+/* TileIndex — one entry per (w, h) pair.
  *
- * tile_count == 0  → pure pair, slab_lookup returns F_values[w][h] directly.
- * tile_count == 1  → first_tile_inline is the only tile; overflow_start unused.
- * tile_count >  1  → first_tile_inline holds tile 0; tiles[overflow_start ..
- *                    overflow_start + tile_count - 2] hold tiles 1..N-1.
+ * tile_count == 0  → pure pair; slab_lookup returns F_values[w][h].
+ * tile_count == 1  → only first_tile_inline used; overflow_start ignored.
+ * tile_count >  1  → first_tile_inline is tile 0;
+ *                    tiles[overflow_start .. overflow_start + tile_count - 2]
+ *                    are tiles 1..N-1.
  */
 typedef struct {
     int  tile_count;
-    Tile first_tile_inline;   /* valid when tile_count >= 1 */
-    int  overflow_start;      /* index into FdSlab.tiles[] for tiles 1..N-1
-                                 (only used when tile_count > 1)            */
+    Tile first_tile_inline;
+    int  overflow_start;
 } TileIndex;
 
 typedef struct {
-    uint16_t  *data;                 /* delta = F[w][h] - Fd, uint16        */
-    Tile      *tiles;                /* overflow tiles (tile index >= 1)    */
+    uint16_t  *data;               /* delta = F[w][h] - Fd, as uint16      */
+    Tile      *tiles;              /* overflow tiles (index >= 1 per wh)   */
     TileIndex *tile_index;
-    uint8_t   *has_tiles;            /* 1 iff tile_count >= 1 for this (w,h)*/
+    uint8_t   *has_tiles;          /* 1 iff tile_count >= 1 for this (w,h) */
+    int       *defect_pool;        /* arena: all tile local-defect lists   */
     int64_t    total_data_entries;
-    int        total_tile_count;     /* entries used in tiles[] (overflow)  */
+    int        total_tile_count;   /* entries used in tiles[] (overflow)   */
     int        sheet_width, sheet_height;
-    int        overflow;             /* set if any delta exceeded UINT16_MAX */
+    int        overflow;           /* set if any delta exceeded UINT16_MAX */
 } FdSlab;
 
 
 /* =============================================================================
- * Slab lookup — retrieve Fd(rect_width, rect_height, sheet_x, sheet_y)
+ * slab_lookup — retrieve Fd(rect_width, rect_height, sheet_x, sheet_y)
  *
- * Fast path (pure pair):
- *   has_tiles[] is checked first. If zero, returns F_values[w][h] immediately
- *   without touching tile_index[] or tiles[].
+ * Fast path (pure pair):     has_tiles[] == 0  →  return F_values[w][h].
+ * Common path (1 tile):      check first_tile_inline (inlined in TileIndex).
+ * Rare path (>1 tiles):      scan overflow tiles[overflow_start ..].
  *
- * Common path (single tile):
- *   The first tile is inlined in TileIndex so only one indirection is needed
- *   to reach the tile bounds, then one more to reach data[]. Two cache misses
- *   instead of three.
+ * Defined inline so it can be used both in solver_core.c (Phase E, billions
+ * of calls) and in _solver.c (reconstruction, few calls) without LTO.
  *
- * Rare path (multiple tiles):
- *   After the inlined tile is checked, remaining tiles are scanned from
- *   tiles[overflow_start].
- *
- * Defined inline so the compiler can inline it into both solver_core.c
- * (hot DP inner loop — billions of calls) and _solver.c (reconstruction
- * wrapper — few calls) without requiring link-time optimization.
+ * NOTE: slab_lookup does NOT access defect_pool.  The pool is used only
+ * during Phase E fill (building cut candidates), not during lookup.
  * ============================================================================= */
 static inline int32_t slab_lookup(const FdSlab  *slab,
                                   const int32_t *F_values,
@@ -188,35 +196,31 @@ static inline int32_t slab_lookup(const FdSlab  *slab,
                                   int sheet_x,    int sheet_y) {
 
     int wh_idx = rect_width * (slab->sheet_height + 1) + rect_height;
-
     int32_t F_wh = F_values[rect_width * col_stride + rect_height];
 
-    /* Fast path: no tiles for this (w,h) → pure, return F immediately. */
     if (!slab->has_tiles[wh_idx])
         return F_wh;
 
-    const TileIndex *ti = &slab->tile_index[wh_idx];
+    const TileIndex *ti   = &slab->tile_index[wh_idx];
+    const Tile      *tile = &ti->first_tile_inline;
 
-    /* Check inlined first tile. */
-    const Tile *tile = &ti->first_tile_inline;
     if (sheet_x >= tile->sheet_x_lo && sheet_x <= tile->sheet_x_hi &&
         sheet_y >= tile->sheet_y_lo && sheet_y <= tile->sheet_y_hi) {
-        int local_x = sheet_x - tile->sheet_x_lo;
-        int local_y = sheet_y - tile->sheet_y_lo;
         uint16_t delta = slab->data[
-            tile->data_offset + (int64_t)local_x * tile->y_span + local_y];
+            tile->data_offset
+            + (int64_t)(sheet_x - tile->sheet_x_lo) * tile->y_span
+            + (sheet_y - tile->sheet_y_lo)];
         return F_wh - (int32_t)delta;
     }
 
-    /* Overflow tiles (tile_count > 1). */
     for (int t = 0; t < ti->tile_count - 1; t++) {
         tile = &slab->tiles[ti->overflow_start + t];
         if (sheet_x >= tile->sheet_x_lo && sheet_x <= tile->sheet_x_hi &&
             sheet_y >= tile->sheet_y_lo && sheet_y <= tile->sheet_y_hi) {
-            int local_x = sheet_x - tile->sheet_x_lo;
-            int local_y = sheet_y - tile->sheet_y_lo;
             uint16_t delta = slab->data[
-                tile->data_offset + (int64_t)local_x * tile->y_span + local_y];
+                tile->data_offset
+                + (int64_t)(sheet_x - tile->sheet_x_lo) * tile->y_span
+                + (sheet_y - tile->sheet_y_lo)];
             return F_wh - (int32_t)delta;
         }
     }
@@ -229,12 +233,8 @@ static inline int32_t slab_lookup(const FdSlab  *slab,
  * SlabEstimate — returned by estimate_slab() for dry-run memory reporting
  * ============================================================================= */
 typedef struct {
-    int     tiles_1dx;
-    int     tiles_1dy;
-    int     tiles_2d;
-    int64_t data_1dx;
-    int64_t data_1dy;
-    int64_t data_2d;
+    int     tiles_1dx, tiles_1dy, tiles_2d;
+    int64_t data_1dx,  data_1dy,  data_2d;
 } SlabEstimate;
 
 
@@ -242,13 +242,11 @@ typedef struct {
  * Function declarations
  * ============================================================================= */
 
-/* Phase 1 — g-table: best single-item tiling */
 void fill_g_table(int sheet_width, int sheet_height,
                   int32_t *g_values, int32_t *g_item_index,
                   int32_t *item_widths, int32_t *item_heights,
                   int32_t *item_areas, int n_items);
 
-/* Phase 2 — F-table: optimal value for pure (defect-free) rectangles */
 void fill_F_table(int sheet_width, int sheet_height,
                   int32_t *g_values, int32_t *g_item_index,
                   int32_t *F_values, int8_t *F_decision_type,
@@ -256,14 +254,12 @@ void fill_F_table(int sheet_width, int sheet_height,
                   int32_t *normal_cuts_x, int32_t *n_normal_cuts_x, int max_x_cuts,
                   int32_t *normal_cuts_y, int32_t *n_normal_cuts_y, int max_y_cuts);
 
-/* Phase 3 — Fd-table via bottom-up slab */
 FdSlab *fill_Fd_slab(int sheet_width, int sheet_height,
                      int32_t *defect_count_prefix, int32_t *F_values,
                      int32_t *normal_cuts_x, int32_t *n_normal_cuts_x, int max_x_cuts,
                      int32_t *normal_cuts_y, int32_t *n_normal_cuts_y, int max_y_cuts,
                      int32_t *defect_array_in, int n_defects);
 
-/* Dry-run: estimate slab memory for all three merge strategies */
 SlabEstimate estimate_slab(int sheet_width, int sheet_height,
                            int32_t *defect_array, int n_defects);
 

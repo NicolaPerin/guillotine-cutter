@@ -1,8 +1,7 @@
 /* =============================================================================
  * _solver.c — Python C extension bindings for the guillotine cutting solver
  *
- * This file is the ONLY file that depends on the Python C API. It provides
- * thin wrappers that:
+ * This file is the ONLY file that depends on the Python C API. It provides wrappers that:
  *   1. Parse Python arguments (PyArg_ParseTuple)
  *   2. Acquire buffer views on numpy arrays (PyObject_GetBuffer)
  *   3. Call the core C functions declared in solver_core.h
@@ -39,16 +38,11 @@
 static void fd_slab_destructor(PyObject *capsule) {
     FdSlab *slab = (FdSlab *)PyCapsule_GetPointer(capsule, "FdSlab");
     if (!slab) return;
-
     free(slab->data);
     free(slab->tile_index);
-
-    if (slab->tiles) {
-        for (int i = 0; i < slab->total_tile_count; i++)
-            free(slab->tiles[i].local_defect_indices);
-        free(slab->tiles);
-    }
-
+    free(slab->has_tiles);
+    free(slab->tiles);
+    free(slab->defect_pool);
     free(slab);
 }
 
