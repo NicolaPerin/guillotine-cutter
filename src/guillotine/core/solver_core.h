@@ -101,26 +101,6 @@ static inline int32_t defect_count_in_rect(const int32_t *prefix, int stride,
  *   Since Fd <= F always, delta >= 0.  FdSlab.overflow is set if any
  *   delta exceeds UINT16_MAX; callers should treat the slab as invalid.
  *
- * DEFECT-INDEX ARENA  (stack-pool pattern)
- *   Each tile needs a small list of which defects overlap it (used during
- *   Phase 3 fill to build Extended Normal Pattern cut candidates).
- *
- *   Old design: each Tile owned a separately malloc'd int[] pointed to by
- *   local_defect_indices — ~1800 tiny scattered heap allocations.
- *
- *   New design: one flat int[] arena (FdSlab.defect_pool) holds ALL
- *   local-defect lists for every tile.  Each Tile stores only a 4-byte
- *   int32_t offset (defect_pool_start) instead of an 8-byte pointer.
- *   Access:  defect_pool[tile->defect_pool_start + li]
- *
- *   Benefits:
- *     - ~1800 malloc/realloc/free calls → 1
- *     - All lists contiguous in memory → better hardware prefetching
- *     - Tile struct 4 bytes smaller; TileIndex shrinks by same amount
- *     - Phase E hot path: one indexed load (pool base in register)
- *       instead of pointer-dereference + indexed load
- *     - Free is trivial: free(slab->defect_pool) once at slab teardown
- *
  * LOOKUP OPTIMIZATIONS
  *   has_tiles[] — checked first; pure (w,h) pairs return F_values[w][h]
  *   without touching tile_index[] or data[].
@@ -134,19 +114,15 @@ static inline int32_t defect_count_in_rect(const int32_t *prefix, int stride,
 /* Tile — one rectangular region of affected (x, y) positions for a
  * given (w, h) pair.
  *
- * defect_pool_start  offset into FdSlab.defect_pool[] where this tile's
- *                    local-defect list begins.  Length = n_local_defects.
- *                    Access: defect_pool[tile->defect_pool_start + li]
- *
- * n_local_defects    number of defects that overlap this tile (may be 0).
+ * Phase E fills data[data_offset .. data_offset + x_span*y_span - 1]
+ * with uint16 deltas for every position in the tile.  Positions within
+ * the tile that are defect-free get delta = 0 (Fd == F).
  */
 typedef struct {
     int      sheet_x_lo, sheet_x_hi;
     int      sheet_y_lo, sheet_y_hi;
     int      x_span, y_span;
     int64_t  data_offset;
-    int32_t  defect_pool_start;   /* offset into FdSlab.defect_pool[]     */
-    int32_t  n_local_defects;     /* length of this tile's defect list    */
 } Tile;
 
 /* TileIndex — one entry per (w, h) pair.
@@ -168,7 +144,6 @@ typedef struct {
     Tile      *tiles;              /* overflow tiles (index >= 1 per wh)   */
     TileIndex *tile_index;
     uint8_t   *has_tiles;          /* 1 iff tile_count >= 1 for this (w,h) */
-    int       *defect_pool;        /* arena: all tile local-defect lists   */
     int64_t    total_data_entries;
     int        total_tile_count;   /* entries used in tiles[] (overflow)   */
     int        sheet_width, sheet_height;
@@ -256,8 +231,6 @@ void fill_F_table(int sheet_width, int sheet_height,
 
 FdSlab *fill_Fd_slab(int sheet_width, int sheet_height,
                      int32_t *defect_count_prefix, int32_t *F_values,
-                     int32_t *normal_cuts_x, int32_t *n_normal_cuts_x, int max_x_cuts,
-                     int32_t *normal_cuts_y, int32_t *n_normal_cuts_y, int max_y_cuts,
                      int32_t *defect_array_in, int n_defects);
 
 SlabEstimate estimate_slab(int sheet_width, int sheet_height,

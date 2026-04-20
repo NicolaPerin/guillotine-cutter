@@ -42,7 +42,6 @@ static void fd_slab_destructor(PyObject *capsule) {
     free(slab->tile_index);
     free(slab->has_tiles);
     free(slab->tiles);
-    free(slab->defect_pool);
     free(slab);
 }
 
@@ -154,49 +153,37 @@ static PyObject *py_fill_F(PyObject *Py_UNUSED(self), PyObject *args) {
  *   (sheet_width, sheet_height,
  *    defect_count_prefix, — numpy int32 array, shape (W+1, H+1), input
  *    F_values,            — numpy int32 array, shape (W+1, H+1), input
- *    normal_cuts_x,       — numpy int32 array, shape (W+1, max_x_cuts), input
- *    n_normal_cuts_x,     — numpy int32 array, shape (W+1,), input
- *    normal_cuts_y,       — numpy int32 array, shape (H+1, max_y_cuts), input
- *    n_normal_cuts_y,     — numpy int32 array, shape (H+1,), input
  *    defect_array,        — numpy int32 array, shape (n_defects, 6), input
- *    max_x_cuts, max_y_cuts, n_defects)
+ *    n_defects)
  *
  * Returns: PyCapsule wrapping the FdSlab pointer.
  *          The capsule destructor frees all slab memory when collected.
  * ============================================================================= */
 static PyObject *py_fill_Fd_slab(PyObject *Py_UNUSED(self), PyObject *args) {
-    int sheet_width, sheet_height, max_x_cuts, max_y_cuts, n_defects;
-    PyObject *o_prefix, *o_F, *o_nx, *o_nlx, *o_ny, *o_nly, *o_defects;
+    int sheet_width, sheet_height, n_defects;
+    PyObject *o_prefix, *o_F, *o_defects;
 
-    if (!PyArg_ParseTuple(args, "iiOOOOOOOiii",
+    if (!PyArg_ParseTuple(args, "iiOOOi",
             &sheet_width, &sheet_height,
             &o_prefix, &o_F,
-            &o_nx, &o_nlx,
-            &o_ny, &o_nly,
             &o_defects,
-            &max_x_cuts, &max_y_cuts, &n_defects))
+            &n_defects))
         return NULL;
 
-    Py_buffer b_prefix, b_F, b_nx, b_nlx, b_ny, b_nly, b_defects;
+    Py_buffer b_prefix, b_F, b_defects;
     if (PyObject_GetBuffer(o_prefix,  &b_prefix,  PyBUF_SIMPLE) < 0 ||
         PyObject_GetBuffer(o_F,       &b_F,       PyBUF_SIMPLE) < 0 ||
-        PyObject_GetBuffer(o_nx,      &b_nx,      PyBUF_SIMPLE) < 0 ||
-        PyObject_GetBuffer(o_nlx,     &b_nlx,     PyBUF_SIMPLE) < 0 ||
-        PyObject_GetBuffer(o_ny,      &b_ny,      PyBUF_SIMPLE) < 0 ||
-        PyObject_GetBuffer(o_nly,     &b_nly,     PyBUF_SIMPLE) < 0 ||
         PyObject_GetBuffer(o_defects, &b_defects, PyBUF_SIMPLE) < 0)
         return NULL;
 
     FdSlab *slab = fill_Fd_slab(
         sheet_width, sheet_height,
-        (int32_t *)b_prefix.buf,  (int32_t *)b_F.buf,
-        (int32_t *)b_nx.buf,      (int32_t *)b_nlx.buf, max_x_cuts,
-        (int32_t *)b_ny.buf,      (int32_t *)b_nly.buf, max_y_cuts,
+        (int32_t *)b_prefix.buf,
+        (int32_t *)b_F.buf,
         (int32_t *)b_defects.buf, n_defects);
 
-    PyBuffer_Release(&b_prefix);  PyBuffer_Release(&b_F);
-    PyBuffer_Release(&b_nx);      PyBuffer_Release(&b_nlx);
-    PyBuffer_Release(&b_ny);      PyBuffer_Release(&b_nly);
+    PyBuffer_Release(&b_prefix);
+    PyBuffer_Release(&b_F);
     PyBuffer_Release(&b_defects);
 
     return PyCapsule_New(slab, "FdSlab", fd_slab_destructor);
