@@ -1,0 +1,111 @@
+{
+  "problem": {
+    "sheet_size": [
+      1000,
+      1000
+    ],
+    "items": [
+      {
+        "id": 0,
+        "width": 117,
+        "height": 109
+      },
+      {
+        "id": 1,
+        "width": 103,
+        "height": 61
+      },
+      {
+        "id": 2,
+        "width": 127,
+        "height": 133
+      },
+      {
+        "id": 3,
+        "width": 92,
+        "height": 90
+      },
+      {
+        "id": 4,
+        "width": 65,
+        "height": 126
+      },
+      {
+        "id": 5,
+        "width": 115,
+        "height": 133
+      },
+      {
+        "id": 6,
+        "width": 77,
+        "height": 130
+      },
+      {
+        "id": 7,
+        "width": 66,
+        "height": 140
+      },
+      {
+        "id": 8,
+        "width": 58,
+        "height": 123
+      },
+      {
+        "id": 9,
+        "width": 91,
+        "height": 145
+      },
+      {
+        "id": 10,
+        "width": 134,
+        "height": 91
+      },
+      {
+        "id": 11,
+        "width": 74,
+        "height": 108
+      },
+      {
+        "id": 12,
+        "width": 130,
+        "height": 134
+      },
+      {
+        "id": 13,
+        "width": 106,
+        "height": 72
+      },
+      {
+        "id": 14,
+        "width": 129,
+        "height": 131
+      },
+      {
+        "id": 15,
+        "width": 74,
+        "height": 113
+      },
+      {
+        "id": 16,
+        "width": 129,
+        "height": 55
+      },
+      {
+        "id": 17,
+        "width": 115,
+        "height": 120
+      },
+      {
+        "id": 18,
+        "width": 134,
+        "height": 57
+      },
+      {
+        "id": 19,
+        "width": 55,
+        "height": 74
+      }
+    ],
+    "defects": []
+  }
+}

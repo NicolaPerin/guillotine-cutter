@@ -1,0 +1,68 @@
+{
+  "problem": {
+    "sheet_size": [
+      200,
+      200
+    ],
+    "items": [
+      {
+        "id": 0,
+        "width": 7,
+        "height": 10
+      },
+      {
+        "id": 1,
+        "width": 12,
+        "height": 14
+      },
+      {
+        "id": 2,
+        "width": 5,
+        "height": 6
+      },
+      {
+        "id": 3,
+        "width": 12,
+        "height": 15
+      },
+      {
+        "id": 4,
+        "width": 13,
+        "height": 7
+      },
+      {
+        "id": 5,
+        "width": 11,
+        "height": 5
+      },
+      {
+        "id": 6,
+        "width": 8,
+        "height": 15
+      },
+      {
+        "id": 7,
+        "width": 10,
+        "height": 12
+      },
+      {
+        "id": 8,
+        "width": 9,
+        "height": 13
+      },
+      {
+        "id": 9,
+        "width": 11,
+        "height": 8
+      }
+    ],
+    "defects": [
+      {
+        "x": 95,
+        "y": 95,
+        "width": 10,
+        "height": 10
+      }
+    ]
+  }
+}

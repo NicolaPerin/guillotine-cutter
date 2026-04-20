@@ -11,7 +11,7 @@ ext = Extension(
         np.get_include(),
         "src/guillotine/core",    # for #include "solver_core.h"
     ],
-    extra_compile_args=["-O2", "-funroll-loops", "-fopenmp", "-Wall"],
+    extra_compile_args=["-O3", "-funroll-loops", "-march=native", "-fopenmp", "-Wall", "-Wextra"],
     extra_link_args=["-fopenmp"],
 )
  
