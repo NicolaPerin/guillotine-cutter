@@ -462,7 +462,7 @@ FdSlab *fill_Fd_slab(int sheet_width, int sheet_height,
     /* --- Phase D: allocate delta array --- */
     slab->data = (uint16_t *)malloc(data_total * sizeof(uint16_t));
 
-    /* --- Phase E: bottom-up DP fill ---
+/* --- Phase E: bottom-up DP fill ---
      *
      * For each (w, h) that has tiles, iterate over its tiles and over
      * all sheet positions (sx, sy) within each tile.
@@ -470,19 +470,15 @@ FdSlab *fill_Fd_slab(int sheet_width, int sheet_height,
      * Pure positions (defect_count_in_rect == 0) are pre-filled with
      * delta = 0 (meaning Fd == F) and skipped.
      *
-     * Defect-affected positions: try every integer cut position from 1
-     * to w-1 (vertical) and 1 to h-1 (horizontal).  Evaluating all
-     * integers guarantees the optimal solution — the normal-pattern and
-     * extended-pattern candidate sets are subsets of the integers, so
-     * the full scan is strictly at least as good.  The mask-building
-     * machinery (rp loops, memset, deduplication arrays) is removed
-     * entirely, reducing per-thread stack usage and eliminating the
-     * mask-build cost at the price of more slab_lookup calls.
+     * Defect-affected positions: try every integer vertical cut z in
+     * [1, w-1] and every integer horizontal cut z in [1, h-1].  The
+     * best combined slab_lookup pair is kept and stored as a uint16 delta.
      *
-     * defect_pool is cached in a local pointer before the loops so the
-     * compiler can keep it in a register through the inner tile iteration.
-     * The is_impure and col_best arrays are per-thread stack allocations
-     * reused across all sx columns a thread processes. */
+     * col_best and is_impure are per-thread stack allocations (alloca),
+     * sized to y_span and reused across all sx columns a thread processes.
+     * OpenMP parallelises the sx loop within each tile with dynamic
+     * scheduling so columns with many impure cells are distributed evenly
+     * across threads. */
 
     for (int w = 1; w <= sheet_width; w++) {
         int wbase = w * col_stride;
