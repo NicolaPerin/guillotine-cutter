@@ -313,6 +313,131 @@ static void eval_strategy(int sheet_width, int sheet_height,
 
 
 /* =============================================================================
+ * phase_e_fill — bottom-up DP fill for defect-affected cells
+ *
+ * For each (w, h) that has tiles, iterates over its tiles and over all
+ * sheet positions (sx, sy) within each tile.
+ *
+ * Pure positions (defect_count_in_rect == 0) are pre-filled with delta = 0
+ * (meaning Fd == F) and skipped.  Defect-affected positions try every
+ * integer vertical cut z in [1, w-1] and horizontal cut z in [1, h-1].
+ *
+ * Loop structure:
+ *   sx (parallel, dynamic) → classify column → vertical z (outer) /
+ *   ly (inner) → horizontal ly (outer) / z (inner) + delta write
+ *
+ * col_best[] and is_impure[] are per-thread stack allocations (alloca)
+ * reused across all sx columns a thread processes.
+ * ============================================================================= */
+static void phase_e_fill(int sheet_width, int sheet_height,
+                          int col_stride,
+                          int32_t  *defect_count_prefix,
+                          int32_t  *F_values,
+                          FdSlab   *slab) {
+
+    for (int w = 1; w <= sheet_width; w++) {
+        int wbase = w * col_stride;
+
+        for (int h = 1; h <= sheet_height; h++) {
+            int wh_idx = wbase + h;
+            if (!slab->has_tiles[wh_idx]) continue;
+
+            TileIndex *ti    = &slab->tile_index[wh_idx];
+            int32_t pure_val = F_values[wh_idx];
+
+            for (int t = 0; t < ti->tile_count; t++) {
+                Tile *tile = (t == 0)
+                    ? &ti->first_tile_inline
+                    : &slab->tiles[ti->overflow_start + t - 1];
+
+                int      y_span = tile->y_span;
+                uint16_t *tdata = &slab->data[tile->data_offset];
+
+                #pragma omp parallel
+                {
+                    /* Per-thread scratch — allocated once per parallel
+                     * region entry, reused across all sx columns this
+                     * thread processes. */
+                    int32_t *col_best  = (int32_t *)alloca(y_span * sizeof(int32_t));
+                    uint8_t *is_impure = (uint8_t *)alloca(y_span * sizeof(uint8_t));
+
+                    #pragma omp for schedule(dynamic, 1)
+                    for (int sx = tile->sheet_x_lo; sx <= tile->sheet_x_hi; sx++) {
+                        int lx = sx - tile->sheet_x_lo;
+
+                        /* --- Pass 1: classify each sy as pure or impure --- */
+                        int impure_count = 0;
+                        for (int ly = 0; ly < y_span; ly++) {
+                            int sy = tile->sheet_y_lo + ly;
+                            if (defect_count_in_rect(defect_count_prefix, col_stride,
+                                                     sx, sy, sx + w, sy + h) == 0) {
+                                tdata[(int64_t)lx * y_span + ly] = 0;
+                                is_impure[ly] = 0;
+                            } else {
+                                is_impure[ly] = 1;
+                                col_best[ly]  = 0;
+                                impure_count++;
+                            }
+                        }
+                        if (impure_count == 0) continue;
+
+                        /* --- Vertical cuts: z outer, ly inner ---
+                         *
+                         * All integer positions z in [1, w-1] are tried.
+                         * Iterating z in the outer loop amortises the
+                         * slab_lookup address computation across all ly
+                         * values in the column. */
+                        for (int z = 1; z < w; z++) {
+                            for (int ly = 0; ly < y_span; ly++) {
+                                if (!is_impure[ly]) continue;
+                                int sy = tile->sheet_y_lo + ly;
+                                int32_t v =
+                                    slab_lookup(slab, F_values, col_stride,
+                                                z,     h, sx,   sy)
+                                  + slab_lookup(slab, F_values, col_stride,
+                                                w - z, h, sx+z, sy);
+                                if (v > col_best[ly]) col_best[ly] = v;
+                            }
+                        }
+
+                        /* --- Horizontal cuts: ly outer, z inner ---
+                         *
+                         * All integer positions z in [1, h-1] are tried.
+                         * ly is outer so the final delta write is in the
+                         * same loop that finishes the horizontal cuts. */
+                        for (int ly = 0; ly < y_span; ly++) {
+                            if (!is_impure[ly]) continue;
+                            int sy = tile->sheet_y_lo + ly;
+
+                            for (int z = 1; z < h; z++) {
+                                int32_t v =
+                                    slab_lookup(slab, F_values, col_stride,
+                                                w,     z,   sx, sy)
+                                  + slab_lookup(slab, F_values, col_stride,
+                                                w, h - z,   sx, sy+z);
+                                if (v > col_best[ly]) col_best[ly] = v;
+                            }
+
+                            /* Store delta = F[w][h] - Fd.  delta >= 0 always.
+                             * If it exceeds UINT16_MAX the overflow flag is
+                             * set; the Python layer will raise rather than
+                             * silently return a truncated result. */
+                            int32_t delta = pure_val - col_best[ly];
+                            if (delta > (int32_t)UINT16_MAX) {
+                                #pragma omp atomic write
+                                slab->overflow = 1;
+                            }
+                            tdata[(int64_t)lx * y_span + ly] = (uint16_t)delta;
+                        }
+                    } /* end omp for sx */
+                } /* end omp parallel */
+            } /* end tile loop */
+        } /* end h loop */
+    } /* end w loop */
+}
+
+
+/* =============================================================================
  * Phase 3 — Fd-table: optimal value for defect-affected rectangles
  *
  * Builds the sparse FdSlab and fills it with a bottom-up DP.
@@ -462,123 +587,9 @@ FdSlab *fill_Fd_slab(int sheet_width, int sheet_height,
     /* --- Phase D: allocate delta array --- */
     slab->data = (uint16_t *)malloc(data_total * sizeof(uint16_t));
 
-/* --- Phase E: bottom-up DP fill ---
-     *
-     * For each (w, h) that has tiles, iterate over its tiles and over
-     * all sheet positions (sx, sy) within each tile.
-     *
-     * Pure positions (defect_count_in_rect == 0) are pre-filled with
-     * delta = 0 (meaning Fd == F) and skipped.
-     *
-     * Defect-affected positions: try every integer vertical cut z in
-     * [1, w-1] and every integer horizontal cut z in [1, h-1].  The
-     * best combined slab_lookup pair is kept and stored as a uint16 delta.
-     *
-     * col_best and is_impure are per-thread stack allocations (alloca),
-     * sized to y_span and reused across all sx columns a thread processes.
-     * OpenMP parallelises the sx loop within each tile with dynamic
-     * scheduling so columns with many impure cells are distributed evenly
-     * across threads. */
-
-    for (int w = 1; w <= sheet_width; w++) {
-        int wbase = w * col_stride;
-
-        for (int h = 1; h <= sheet_height; h++) {
-            int wh_idx = wbase + h;
-            if (!slab->has_tiles[wh_idx]) continue;
-
-            TileIndex *ti    = &slab->tile_index[wh_idx];
-            int32_t pure_val = F_values[wh_idx];
-
-            for (int t = 0; t < ti->tile_count; t++) {
-                Tile *tile = (t == 0)
-                    ? &ti->first_tile_inline
-                    : &slab->tiles[ti->overflow_start + t - 1];
-
-                int      y_span = tile->y_span;
-                uint16_t *tdata = &slab->data[tile->data_offset];
-
-                #pragma omp parallel
-                {
-                    /* Per-thread scratch — allocated once per parallel
-                     * region entry, reused across all sx columns this
-                     * thread processes. */
-                    int32_t *col_best  = (int32_t *)alloca(y_span * sizeof(int32_t));
-                    uint8_t *is_impure = (uint8_t *)alloca(y_span * sizeof(uint8_t));
-
-                    #pragma omp for schedule(dynamic, 1)
-                    for (int sx = tile->sheet_x_lo; sx <= tile->sheet_x_hi; sx++) {
-                        int lx = sx - tile->sheet_x_lo;
-
-                        /* --- Pass 1: classify each sy as pure or impure --- */
-                        int impure_count = 0;
-                        for (int ly = 0; ly < y_span; ly++) {
-                            int sy = tile->sheet_y_lo + ly;
-                            if (defect_count_in_rect(defect_count_prefix, col_stride,
-                                                     sx, sy, sx + w, sy + h) == 0) {
-                                tdata[(int64_t)lx * y_span + ly] = 0;
-                                is_impure[ly] = 0;
-                            } else {
-                                is_impure[ly] = 1;
-                                col_best[ly]  = 0;
-                                impure_count++;
-                            }
-                        }
-                        if (impure_count == 0) continue;
-
-                        /* --- Vertical cuts: z outer, ly inner ---
-                         *
-                         * All integer positions z in [1, w-1] are tried.
-                         * Iterating z in the outer loop amortises the
-                         * slab_lookup address computation across all ly
-                         * values in the column. */
-                        for (int z = 1; z < w; z++) {
-                            for (int ly = 0; ly < y_span; ly++) {
-                                if (!is_impure[ly]) continue;
-                                int sy = tile->sheet_y_lo + ly;
-                                int32_t v =
-                                    slab_lookup(slab, F_values, col_stride,
-                                                z,     h, sx,   sy)
-                                  + slab_lookup(slab, F_values, col_stride,
-                                                w - z, h, sx+z, sy);
-                                if (v > col_best[ly]) col_best[ly] = v;
-                            }
-                        }
-
-                        /* --- Horizontal cuts: ly outer, z inner ---
-                         *
-                         * All integer positions z in [1, h-1] are tried.
-                         * ly is outer so the final delta write is in the
-                         * same loop that finishes the horizontal cuts. */
-                        for (int ly = 0; ly < y_span; ly++) {
-                            if (!is_impure[ly]) continue;
-                            int sy = tile->sheet_y_lo + ly;
-
-                            for (int z = 1; z < h; z++) {
-                                int32_t v =
-                                    slab_lookup(slab, F_values, col_stride,
-                                                w,     z,   sx, sy)
-                                  + slab_lookup(slab, F_values, col_stride,
-                                                w, h - z,   sx, sy+z);
-                                if (v > col_best[ly]) col_best[ly] = v;
-                            }
-
-                            /* Store delta = F[w][h] - Fd.  delta >= 0 always.
-                             * If it exceeds UINT16_MAX the overflow flag is
-                             * set; the Python layer will raise rather than
-                             * silently return a truncated result. */
-                            int32_t delta = pure_val - col_best[ly];
-                            if (delta > (int32_t)UINT16_MAX) {
-                                #pragma omp atomic write
-                                slab->overflow = 1;
-                            }
-                            tdata[(int64_t)lx * y_span + ly] = (uint16_t)delta;
-                        }
-                    } /* end omp for sx */
-                } /* end omp parallel */
-            } /* end tile loop */
-        } /* end h loop */
-    } /* end w loop */
+    /* --- Phase E --- */
+    phase_e_fill(sheet_width, sheet_height, col_stride,
+                 defect_count_prefix, F_values, slab);
 
     free(defects);
     free(iv_scratch[0]);
