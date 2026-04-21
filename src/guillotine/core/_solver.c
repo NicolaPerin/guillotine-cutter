@@ -195,7 +195,7 @@ static PyObject *py_fill_Fd_slab(PyObject *Py_UNUSED(self), PyObject *args) {
  *
  * During backtracking, the Python code needs to query Fd(w, h, x, y) to
  * determine which cut was optimal at each sub-rectangle. This function
- * provides that query via the slab_lookup() inline from solver_core.h.
+ * provides that query via resolve_col()/colref_get() from solver_core.h.
  *
  * Args from Python:
  *   (capsule,        — PyCapsule wrapping the FdSlab
@@ -208,22 +208,23 @@ static PyObject *py_fill_Fd_slab(PyObject *Py_UNUSED(self), PyObject *args) {
 static PyObject *py_fd_slab_lookup(PyObject *Py_UNUSED(self), PyObject *args) {
     PyObject *capsule, *o_F;
     int sheet_height, rect_width, rect_height, sheet_x, sheet_y;
-
     if (!PyArg_ParseTuple(args, "OOiiiii",
-            &capsule, &o_F, &sheet_height,
-            &rect_width, &rect_height, &sheet_x, &sheet_y))
+                          &capsule, &o_F, &sheet_height,
+                          &rect_width, &rect_height, &sheet_x, &sheet_y))
         return NULL;
 
-    FdSlab *slab = (FdSlab *)PyCapsule_GetPointer(capsule, "FdSlab");
-
+    FdSlab  *slab = (FdSlab *)PyCapsule_GetPointer(capsule, "FdSlab");
     Py_buffer b_F;
     PyObject_GetBuffer(o_F, &b_F, PyBUF_SIMPLE);
 
-    int32_t value = slab_lookup(slab, (int32_t *)b_F.buf, sheet_height + 1,
-                                rect_width, rect_height, sheet_x, sheet_y);
+    int col_stride = sheet_height + 1;
+    int32_t *F_values = (int32_t *)b_F.buf;
+
+    ColRef cr = resolve_col(slab, F_values, col_stride,
+                            rect_width, rect_height, sheet_x);
+    int32_t value = colref_get(&cr, sheet_y);
 
     PyBuffer_Release(&b_F);
-
     return PyLong_FromLong(value);
 }
 

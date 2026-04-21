@@ -43,55 +43,6 @@ typedef struct {
     int y_hi; 
 } PositionInterval;
 
-#define MAX_COL_SEGS 1024 /* max segments per column in resolve_col; sanity check to prevent OOM on bad input */
-
-typedef struct {
-    int32_t  pure_val;
-    int      n_segs;
-    struct {
-        int       y_lo, y_hi;
-        uint16_t *delta_col;
-    } segs[MAX_COL_SEGS];
-} ColRef;
-
-static inline ColRef resolve_col(const FdSlab *slab, const int32_t *F_values,
-                                  int col_stride, int wp, int hp, int sx) {
-    ColRef r;
-    int wh = wp * col_stride + hp;
-    r.pure_val = F_values[wh];
-    r.n_segs   = 0;
-    if (!slab->has_tiles[wh]) return r;
-
-    TileIndex *ti = &slab->tile_index[wh];
-    for (int t = 0; t < ti->tile_count && r.n_segs < MAX_COL_SEGS; t++) {
-        Tile *tp = (t == 0) ? &ti->first_tile_inline
-                            : &slab->tiles[ti->overflow_start + t - 1];
-        if (sx >= tp->sheet_x_lo && sx <= tp->sheet_x_hi) {
-            if (r.n_segs >= MAX_COL_SEGS) {
-                fprintf(stderr, "ERROR: MAX_COL_SEGS (%d) exceeded for "
-                                "(w=%d, h=%d, sx=%d). Increase MAX_COL_SEGS.\n",
-                                MAX_COL_SEGS, wp, hp, sx);
-                abort();
-            }
-            int lx = sx - tp->sheet_x_lo;
-            int s  = r.n_segs++;
-            r.segs[s].y_lo      = tp->sheet_y_lo;
-            r.segs[s].y_hi      = tp->sheet_y_hi;
-            r.segs[s].delta_col = &slab->data[tp->data_offset
-                                              + (int64_t)lx * tp->y_span];
-        }
-    }
-    return r;
-}
-
-static inline int32_t colref_get(const ColRef *r, int sy) {
-    for (int s = 0; s < r->n_segs; s++) {
-        if (sy >= r->segs[s].y_lo && sy <= r->segs[s].y_hi)
-            return r->pure_val - r->segs[s].delta_col[sy - r->segs[s].y_lo];
-    }
-    return r->pure_val;
-}
-
 /* =============================================================================
  * qsort comparators
  * ============================================================================= */
@@ -435,11 +386,10 @@ static void phase_e_fill(int sheet_width, int sheet_height,
                         if (impure_count == 0) continue;
 
                         /* --- Vertical cuts: z outer, ly inner ---
-                         *
-                         * All integer positions z in [1, w-1] are tried.
-                         * Iterating z in the outer loop amortises the
-                         * slab_lookup address computation across all ly
-                         * values in the column. */
+                        *
+                        * All integer positions z in [1, w-1] are tried.
+                        * Keeping z in the outer loop lets resolve_col() run once per z,
+                        * amortising the tile-scan cost across all ly values in the column. */
 
                         for (int z = 1; z < w; z++) {
                             ColRef left  = resolve_col(slab, F_values, col_stride, z,     h, sx);
@@ -508,8 +458,8 @@ static void phase_e_fill(int sheet_width, int sheet_height,
  * Phase A  sort a working copy of the defect array by x for consistent
  *          interval merging across all (w, h) iterations
  *
- * Phase B  evaluate all three merge strategies in parallel, pick the best:
- *          - primary criterion: fewest tiles (drives slab_lookup cost)
+* Phase B  evaluate all three merge strategies in parallel, pick the best:
+ *          - primary criterion: fewest tiles (drives resolve_col tile-scan cost)
  *          - constraint: data size must not exceed min_data × 1.20
  *
  * Phase C  build tile geometry and assign data offsets into the flat
@@ -582,10 +532,10 @@ FdSlab *fill_Fd_slab(int sheet_width, int sheet_height,
                 n_data_per_strategy[s] * 4.0 / 1024.0 / 1024.0);
 
     /* Pick the strategy with the fewest tiles whose data size is within
-     * 20% of the global minimum.  Fewest tiles minimises slab_lookup cost
-     * since it reduces the per-lookup tile scan.  The 20% tolerance
-     * prevents choosing a strategy with many tiles just to save a little
-     * memory. */
+    * 20% of the global minimum.  Fewest tiles minimises resolve_col cost
+    * since it reduces the per-column tile scan in the inner loop.
+    * The 20% tolerance prevents choosing a strategy with many tiles
+    * just to save a little memory. */
     int64_t min_data = n_data_per_strategy[0];
     for (int s = 1; s < 3; s++)
         if (n_data_per_strategy[s] < min_data) min_data = n_data_per_strategy[s];
