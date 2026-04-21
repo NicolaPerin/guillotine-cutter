@@ -29,7 +29,6 @@
 #include <string.h>
 #include <stdio.h>
 
-
 /* =============================================================================
  * PositionInterval — scratch type used while building tiles for one (w, h).
  *
@@ -37,8 +36,61 @@
  * positions whose rectangle overlaps a single defect.  These are temporary
  * and are allocated once and reused across all (w, h) iterations.
  * ============================================================================= */
-typedef struct { int x_lo, x_hi, y_lo, y_hi; } PositionInterval;
+typedef struct { 
+    int x_lo; 
+    int x_hi; 
+    int y_lo; 
+    int y_hi; 
+} PositionInterval;
 
+#define MAX_COL_SEGS 1024 /* max segments per column in resolve_col; sanity check to prevent OOM on bad input */
+
+typedef struct {
+    int32_t  pure_val;
+    int      n_segs;
+    struct {
+        int       y_lo, y_hi;
+        uint16_t *delta_col;
+    } segs[MAX_COL_SEGS];
+} ColRef;
+
+static inline ColRef resolve_col(const FdSlab *slab, const int32_t *F_values,
+                                  int col_stride, int wp, int hp, int sx) {
+    ColRef r;
+    int wh = wp * col_stride + hp;
+    r.pure_val = F_values[wh];
+    r.n_segs   = 0;
+    if (!slab->has_tiles[wh]) return r;
+
+    TileIndex *ti = &slab->tile_index[wh];
+    for (int t = 0; t < ti->tile_count && r.n_segs < MAX_COL_SEGS; t++) {
+        Tile *tp = (t == 0) ? &ti->first_tile_inline
+                            : &slab->tiles[ti->overflow_start + t - 1];
+        if (sx >= tp->sheet_x_lo && sx <= tp->sheet_x_hi) {
+            if (r.n_segs >= MAX_COL_SEGS) {
+                fprintf(stderr, "ERROR: MAX_COL_SEGS (%d) exceeded for "
+                                "(w=%d, h=%d, sx=%d). Increase MAX_COL_SEGS.\n",
+                                MAX_COL_SEGS, wp, hp, sx);
+                abort();
+            }
+            int lx = sx - tp->sheet_x_lo;
+            int s  = r.n_segs++;
+            r.segs[s].y_lo      = tp->sheet_y_lo;
+            r.segs[s].y_hi      = tp->sheet_y_hi;
+            r.segs[s].delta_col = &slab->data[tp->data_offset
+                                              + (int64_t)lx * tp->y_span];
+        }
+    }
+    return r;
+}
+
+static inline int32_t colref_get(const ColRef *r, int sy) {
+    for (int s = 0; s < r->n_segs; s++) {
+        if (sy >= r->segs[s].y_lo && sy <= r->segs[s].y_hi)
+            return r->pure_val - r->segs[s].delta_col[sy - r->segs[s].y_lo];
+    }
+    return r->pure_val;
+}
 
 /* =============================================================================
  * qsort comparators
@@ -355,6 +407,7 @@ static void phase_e_fill(int sheet_width, int sheet_height,
 
                 #pragma omp parallel
                 {
+
                     /* Per-thread scratch — allocated once per parallel
                      * region entry, reused across all sx columns this
                      * thread processes. */
@@ -387,41 +440,51 @@ static void phase_e_fill(int sheet_width, int sheet_height,
                          * Iterating z in the outer loop amortises the
                          * slab_lookup address computation across all ly
                          * values in the column. */
+
                         for (int z = 1; z < w; z++) {
+                            ColRef left  = resolve_col(slab, F_values, col_stride, z,     h, sx);
+                            ColRef right = resolve_col(slab, F_values, col_stride, w - z, h, sx + z);
+
                             for (int ly = 0; ly < y_span; ly++) {
                                 if (!is_impure[ly]) continue;
                                 int sy = tile->sheet_y_lo + ly;
-                                int32_t v =
-                                    slab_lookup(slab, F_values, col_stride,
-                                                z,     h, sx,   sy)
-                                  + slab_lookup(slab, F_values, col_stride,
-                                                w - z, h, sx+z, sy);
+                                int32_t v = colref_get(&left, sy) + colref_get(&right, sy);
                                 if (v > col_best[ly]) col_best[ly] = v;
                             }
                         }
 
-                        /* --- Horizontal cuts: ly outer, z inner ---
+                        /* --- Horizontal cuts: z outer, ly inner ---
                          *
-                         * All integer positions z in [1, h-1] are tried.
-                         * ly is outer so the final delta write is in the
-                         * same loop that finishes the horizontal cuts. */
-                        for (int ly = 0; ly < y_span; ly++) {
-                            if (!is_impure[ly]) continue;
-                            int sy = tile->sheet_y_lo + ly;
+                         * A horizontal cut at z splits the current rectangle (w × h) at (sx, sy)
+                         * into a top piece (w × z) still at (sx, sy) and a bottom piece
+                         * (w × h-z) shifted down to (sx, sy+z).  Both pieces share the same
+                         * x-column sx, so resolve_col is called with sx for both; the y
+                         * coordinate differs and is handled per-ly inside colref_get. */
+                        for (int z = 1; z < h; z++) {
+                            ColRef top = resolve_col(slab, F_values, col_stride, w,     z, sx);
+                            ColRef bot = resolve_col(slab, F_values, col_stride, w, h - z, sx);
 
-                            for (int z = 1; z < h; z++) {
-                                int32_t v =
-                                    slab_lookup(slab, F_values, col_stride,
-                                                w,     z,   sx, sy)
-                                  + slab_lookup(slab, F_values, col_stride,
-                                                w, h - z,   sx, sy+z);
+                            for (int ly = 0; ly < y_span; ly++) {
+                                if (!is_impure[ly]) continue;
+                                int sy = tile->sheet_y_lo + ly;
+                                /* top sits at sy, bot sits at sy+z */
+                                int32_t v = colref_get(&top, sy) + colref_get(&bot, sy + z);
                                 if (v > col_best[ly]) col_best[ly] = v;
                             }
+                        }
 
-                            /* Store delta = F[w][h] - Fd.  delta >= 0 always.
-                             * If it exceeds UINT16_MAX the overflow flag is
-                             * set; the Python layer will raise rather than
-                             * silently return a truncated result. */
+                        /* --- Delta write: separate final pass ---
+                        *
+                        * col_best[ly] is now fully resolved for all impure rows.
+                        * Separated from the cut loops since the delta write was previously
+                        * the closing step of the ly-outer loop; with z now outer it belongs
+                        * in its own pass.
+                        *
+                        * delta = F[w][h] - Fd >= 0 always.  If it exceeds UINT16_MAX the
+                        * overflow flag is set; the Python layer will raise rather than
+                        * silently return a truncated result. */
+                        for (int ly = 0; ly < y_span; ly++) {
+                            if (!is_impure[ly]) continue;
                             int32_t delta = pure_val - col_best[ly];
                             if (delta > (int32_t)UINT16_MAX) {
                                 #pragma omp atomic write
