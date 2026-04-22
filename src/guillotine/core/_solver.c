@@ -220,8 +220,9 @@ static PyObject *py_fd_slab_lookup(PyObject *Py_UNUSED(self), PyObject *args) {
     int col_stride = sheet_height + 1;
     int32_t *F_values = (int32_t *)b_F.buf;
 
-    ColRef cr = resolve_col(slab, F_values, col_stride,
-                            rect_width, rect_height, sheet_x);
+    ColRef cr;
+    resolve_col(&cr, slab, F_values, col_stride, rect_width, rect_height, sheet_x);
+    
     int32_t value = colref_get(&cr, sheet_y);
 
     PyBuffer_Release(&b_F);

@@ -86,7 +86,7 @@ typedef struct {
  * Column resolver
  * ============================================================================= */
 
-#define MAX_COL_SEGS 1024
+#define MAX_COL_SEGS 64
 
 typedef struct {
     int32_t  pure_val;
@@ -97,24 +97,23 @@ typedef struct {
     } segs[MAX_COL_SEGS];
 } ColRef;
 
-static inline ColRef resolve_col(const FdSlab *slab, const int32_t *F_values,
-                                 int col_stride, int wp, int hp, int sx) {
-    ColRef r;
+static inline void resolve_col(ColRef *out, const FdSlab *slab, const int32_t *F_values,
+                                int col_stride, int wp, int hp, int sx) {
     int wh = wp * col_stride + hp;
-    r.pure_val = F_values[wh];
-    r.n_segs   = 0;
+    out->pure_val = F_values[wh];
+    out->n_segs   = 0;
 
-    if (!slab->has_tiles[wh]) return r;
+    if (!slab->has_tiles[wh]) return;
 
     TileIndex *ti = &slab->tile_index[wh];
 
-    for (int t = 0; t < ti->tile_count && r.n_segs < MAX_COL_SEGS; t++) {
+    for (int t = 0; t < ti->tile_count; t++) {
         Tile *tp = (t == 0)
             ? &ti->first_tile_inline
             : &slab->tiles[ti->overflow_start + t - 1];
 
         if (sx >= tp->sheet_x_lo && sx <= tp->sheet_x_hi) {
-            if (r.n_segs >= MAX_COL_SEGS) {
+            if (out->n_segs >= MAX_COL_SEGS) {
                 fprintf(stderr,
                         "ERROR: MAX_COL_SEGS (%d) exceeded for "
                         "(w=%d, h=%d, sx=%d)\n",
@@ -123,16 +122,14 @@ static inline ColRef resolve_col(const FdSlab *slab, const int32_t *F_values,
             }
 
             int lx = sx - tp->sheet_x_lo;
-            int s  = r.n_segs++;
+            int s  = out->n_segs++;
 
-            r.segs[s].y_lo = tp->sheet_y_lo;
-            r.segs[s].y_hi = tp->sheet_y_hi;
-            r.segs[s].delta_col =
+            out->segs[s].y_lo = tp->sheet_y_lo;
+            out->segs[s].y_hi = tp->sheet_y_hi;
+            out->segs[s].delta_col =
                 &slab->data[tp->data_offset + (int64_t)lx * tp->y_span];
         }
     }
-
-    return r;
 }
 
 static inline int32_t colref_get(const ColRef *r, int sy) {

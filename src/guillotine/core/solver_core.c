@@ -332,11 +332,28 @@ static void eval_strategy(int sheet_width, int sheet_height,
  * col_best[] and is_impure[] are per-thread stack allocations (alloca)
  * reused across all sx columns a thread processes.
  * ============================================================================= */
+#include <omp.h>
+
 static void phase_e_fill(int sheet_width, int sheet_height,
                           int col_stride,
                           int32_t  *defect_count_prefix,
                           int32_t  *F_values,
                           FdSlab   *slab) {
+
+    /* --- Allocate per-thread scratch once, up front ---
+     *
+     * Each thread gets its own (col_best, is_impure) pair, both sized for
+     * the worst-case y_span (sheet_height).
+     *
+     * Layout:
+     *   [col_best_t0 | pad][col_best_t1 | pad]... [is_impure_t0 | pad]...
+     *
+     * Using two separate allocations (one per array) keeps the
+     * per-thread stride computation trivial and makes bounds-checking
+     * straightforward. */
+    int     nthreads        = omp_get_max_threads();
+    int32_t *col_best_pool  = (int32_t *)malloc(nthreads * sheet_height * sizeof(int32_t));
+    uint8_t *is_impure_pool = (uint8_t *)malloc(nthreads * sheet_height * sizeof(uint8_t));
 
     for (int w = 1; w <= sheet_width; w++) {
         int wbase = w * col_stride;
@@ -358,12 +375,9 @@ static void phase_e_fill(int sheet_width, int sheet_height,
 
                 #pragma omp parallel
                 {
-
-                    /* Per-thread scratch — allocated once per parallel
-                     * region entry, reused across all sx columns this
-                     * thread processes. */
-                    int32_t *col_best  = (int32_t *)alloca(y_span * sizeof(int32_t));
-                    uint8_t *is_impure = (uint8_t *)alloca(y_span * sizeof(uint8_t));
+                    int tid = omp_get_thread_num();
+                    int32_t *col_best  = col_best_pool  + tid * sheet_height;
+                    uint8_t *is_impure = is_impure_pool + tid * sheet_height;
 
                     #pragma omp for schedule(dynamic, 1)
                     for (int sx = tile->sheet_x_lo; sx <= tile->sheet_x_hi; sx++) {
@@ -385,15 +399,11 @@ static void phase_e_fill(int sheet_width, int sheet_height,
                         }
                         if (impure_count == 0) continue;
 
-                        /* --- Vertical cuts: z outer, ly inner ---
-                        *
-                        * All integer positions z in [1, w-1] are tried.
-                        * Keeping z in the outer loop lets resolve_col() run once per z,
-                        * amortising the tile-scan cost across all ly values in the column. */
-
+                        /* --- Vertical cuts: z outer, ly inner --- */
                         for (int z = 1; z < w; z++) {
-                            ColRef left  = resolve_col(slab, F_values, col_stride, z,     h, sx);
-                            ColRef right = resolve_col(slab, F_values, col_stride, w - z, h, sx + z);
+                            ColRef left, right;
+                            resolve_col(&left,  slab, F_values, col_stride, z,     h, sx);
+                            resolve_col(&right, slab, F_values, col_stride, w - z, h, sx + z);
 
                             for (int ly = 0; ly < y_span; ly++) {
                                 if (!is_impure[ly]) continue;
@@ -403,36 +413,21 @@ static void phase_e_fill(int sheet_width, int sheet_height,
                             }
                         }
 
-                        /* --- Horizontal cuts: z outer, ly inner ---
-                         *
-                         * A horizontal cut at z splits the current rectangle (w × h) at (sx, sy)
-                         * into a top piece (w × z) still at (sx, sy) and a bottom piece
-                         * (w × h-z) shifted down to (sx, sy+z).  Both pieces share the same
-                         * x-column sx, so resolve_col is called with sx for both; the y
-                         * coordinate differs and is handled per-ly inside colref_get. */
+                        /* --- Horizontal cuts: z outer, ly inner --- */
                         for (int z = 1; z < h; z++) {
-                            ColRef top = resolve_col(slab, F_values, col_stride, w,     z, sx);
-                            ColRef bot = resolve_col(slab, F_values, col_stride, w, h - z, sx);
+                            ColRef top, bot;
+                            resolve_col(&top, slab, F_values, col_stride, w,     z, sx);
+                            resolve_col(&bot, slab, F_values, col_stride, w, h - z, sx);
 
                             for (int ly = 0; ly < y_span; ly++) {
                                 if (!is_impure[ly]) continue;
                                 int sy = tile->sheet_y_lo + ly;
-                                /* top sits at sy, bot sits at sy+z */
                                 int32_t v = colref_get(&top, sy) + colref_get(&bot, sy + z);
                                 if (v > col_best[ly]) col_best[ly] = v;
                             }
                         }
 
-                        /* --- Delta write: separate final pass ---
-                        *
-                        * col_best[ly] is now fully resolved for all impure rows.
-                        * Separated from the cut loops since the delta write was previously
-                        * the closing step of the ly-outer loop; with z now outer it belongs
-                        * in its own pass.
-                        *
-                        * delta = F[w][h] - Fd >= 0 always.  If it exceeds UINT16_MAX the
-                        * overflow flag is set; the Python layer will raise rather than
-                        * silently return a truncated result. */
+                        /* --- Delta write --- */
                         for (int ly = 0; ly < y_span; ly++) {
                             if (!is_impure[ly]) continue;
                             int32_t delta = pure_val - col_best[ly];
@@ -447,8 +442,10 @@ static void phase_e_fill(int sheet_width, int sheet_height,
             } /* end tile loop */
         } /* end h loop */
     } /* end w loop */
-}
 
+    free(col_best_pool);
+    free(is_impure_pool);
+}
 
 /* =============================================================================
  * Phase 3 — Fd-table: optimal value for defect-affected rectangles
