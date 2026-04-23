@@ -1,5 +1,4 @@
 #include <cuda_runtime.h>
-#include <cub/cub.cuh>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -7,149 +6,177 @@ extern "C" {
 #include "solver_core.h"
 }
 
-#define MAX_VAL(a, b) ((a) > (b) ? (a) : (b))
-
 struct DPJob {
-    int16_t sx;
-    int16_t sy;
+    int16_t w, h;
+    int32_t tile_idx;
+    int16_t lx;
 };
 
-struct GPUMapDevice {
-    HashEntry* entries;
-    size_t mask;
-};
+// Device-side Column Resolver (Matches CPU logic exactly)
+__device__ void resolve_col_device(ColRef* cr, int w, int h, int sx, 
+                                   const int32_t* F_values, int col_stride,
+                                   const uint8_t* has_tiles, const TileIndex* tile_index,
+                                   const Tile* tiles, const uint16_t* data) {
+    int wh_idx = w * col_stride + h;
+    cr->pure_val = F_values[wh_idx];
+    cr->is_pure = true;
 
-// --- ADD THIS MIXING FUNCTION ---
-__device__ __host__ inline uint64_t mix_hash(uint64_t key) {
-    key ^= key >> 33;
-    key *= 0xff51afd7ed558ccdULL;
-    key ^= key >> 33;
-    key *= 0xc4ceb9fe1a85ec53ULL;
-    key ^= key >> 33;
-    return key;
-}
+    if (!has_tiles[wh_idx]) return;
+    const TileIndex* ti = &tile_index[wh_idx];
+    if (ti->tile_count == 0) return;
 
-__device__ __host__ inline uint64_t pack_key_gpu(uint16_t w, uint16_t h, uint16_t sx, uint16_t sy) {
-    return ((uint64_t)w << 48) | ((uint64_t)h << 32) | ((uint64_t)sx << 16) | (uint64_t)sy;
-}
-
-__device__ void map_insert(GPUMapDevice map, uint64_t key, uint16_t delta) {
-    // --- CHANGED: Apply mix_hash before masking ---
-    size_t idx = mix_hash(key) & map.mask;
-    
-    while (true) {
-        unsigned long long assumed = 0;
-        unsigned long long old = atomicCAS((unsigned long long*)&map.entries[idx].key, assumed, (unsigned long long)key);
-        
-        if (old == 0 || old == (unsigned long long)key) {
-            map.entries[idx].delta = delta;
+    int L = 0, R = ti->tile_count - 1;
+    while (L <= R) {
+        int M = L + (R - L) / 2;
+        const Tile* t = (M == 0) ? &ti->first_tile_inline : &tiles[ti->overflow_start + M - 1];
+        if (sx < t->sheet_x_lo) R = M - 1;
+        else if (sx > t->sheet_x_hi) L = M + 1;
+        else {
+            cr->is_pure = false;
+            cr->y_span = t->y_span;
+            cr->sheet_y_lo = t->sheet_y_lo;
+            cr->tdata = &data[t->data_offset + (sx - t->sheet_x_lo) * t->y_span];
             return;
         }
-        idx = (idx + 1) & map.mask;
     }
 }
 
-__device__ inline int32_t lookup_device(GPUMapDevice map, const int32_t* F_values, int col_stride, int w, int h, int sx, int sy) {
-    uint64_t key = pack_key_gpu(w, h, sx, sy);
-    
-    // --- CHANGED: Apply mix_hash before masking ---
-    size_t idx = mix_hash(key) & map.mask;
-    
-    while (true) {
-        uint64_t k = map.entries[idx].key;
-        if (k == key) return F_values[w * col_stride + h] - map.entries[idx].delta;
-        if (k == 0)   return F_values[w * col_stride + h];
-        idx = (idx + 1) & map.mask;
-    }
+__device__ inline int32_t colref_get_device(const ColRef* cr, int sy) {
+    if (cr->is_pure) return cr->pure_val;
+    int ly = sy - cr->sheet_y_lo;
+    if (ly >= 0 && ly < cr->y_span) return cr->pure_val - cr->tdata[ly];
+    return cr->pure_val;
 }
 
-__global__ void solve_state_kernel(DPJob* jobs, int num_jobs, int w, int h, int col_stride, const int32_t* F_values, int32_t pure_val, GPUMapDevice map) {
+__global__ void solve_diagonal_kernel(const DPJob* jobs, int num_jobs, int col_stride,
+                                      const int32_t* F_values, const int32_t* defect_prefix,
+                                      const uint8_t* has_tiles, const TileIndex* tile_index,
+                                      const Tile* tiles, uint16_t* data, int* overflow_flag) {
+    
     int job_idx = blockIdx.x;
     if (job_idx >= num_jobs) return;
 
     DPJob job = jobs[job_idx];
-    int sx = job.sx;
-    int sy = job.sy;
-    int32_t thread_best = 0;
+    int w = job.w;
+    int h = job.h;
+    int wh_idx = w * col_stride + h;
 
-    for (int z = 1 + threadIdx.x; z < w; z += blockDim.x) {
-        int32_t left = lookup_device(map, F_values, col_stride, z, h, sx, sy);
-        int32_t right = lookup_device(map, F_values, col_stride, w - z, h, sx + z, sy);
-        thread_best = MAX_VAL(thread_best, left + right);
-    }
+    const TileIndex* ti = &tile_index[wh_idx];
+    const Tile* tile = (job.tile_idx == 0) ? &ti->first_tile_inline : &tiles[ti->overflow_start + job.tile_idx - 1];
+    
+    int sx = tile->sheet_x_lo + job.lx;
+    int pure_val = F_values[wh_idx];
 
-    for (int z = 1 + threadIdx.x; z < h; z += blockDim.x) {
-        int32_t bottom = lookup_device(map, F_values, col_stride, w, z, sx, sy);
-        int32_t top = lookup_device(map, F_values, col_stride, w, h - z, sx, sy + z);
-        thread_best = MAX_VAL(thread_best, bottom + top);
-    }
+    // Threads in the block process the 'y' values simultaneously
+    for (int ly = threadIdx.x; ly < tile->y_span; ly += blockDim.x) {
+        int sy = tile->sheet_y_lo + ly;
+        
+        int d_count = defect_prefix[(sx + w) * col_stride + (sy + h)]
+                    - defect_prefix[sx * col_stride + (sy + h)]
+                    - defect_prefix[(sx + w) * col_stride + sy]
+                    + defect_prefix[sx * col_stride + sy];
+        
+        if (d_count == 0) {
+            data[tile->data_offset + job.lx * tile->y_span + ly] = 0;
+            continue;
+        }
 
-    typedef cub::BlockReduce<int32_t, 128> BlockReduce;
-    __shared__ typename BlockReduce::TempStorage temp_storage;
-    int32_t block_best = BlockReduce(temp_storage).Reduce(thread_best, cub::Max());
+        int32_t best_val = 0;
 
-    if (threadIdx.x == 0) {
-        uint16_t delta = (uint16_t)(pure_val - block_best);
-        map_insert(map, pack_key_gpu(w, h, sx, sy), delta);
+        for (int z = 1; z < w; z++) {
+            ColRef left, right;
+            resolve_col_device(&left, z, h, sx, F_values, col_stride, has_tiles, tile_index, tiles, data);
+            resolve_col_device(&right, w - z, h, sx + z, F_values, col_stride, has_tiles, tile_index, tiles, data);
+            int32_t v = colref_get_device(&left, sy) + colref_get_device(&right, sy);
+            if (v > best_val) best_val = v;
+        }
+
+        for (int z = 1; z < h; z++) {
+            ColRef top, bottom;
+            resolve_col_device(&top, w, z, sx, F_values, col_stride, has_tiles, tile_index, tiles, data);
+            resolve_col_device(&bottom, w, h - z, sx, F_values, col_stride, has_tiles, tile_index, tiles, data);
+            int32_t v = colref_get_device(&top, sy) + colref_get_device(&bottom, sy + z);
+            if (v > best_val) best_val = v;
+        }
+
+        int32_t delta = pure_val - best_val;
+        if (delta > 65535) atomicExch(overflow_flag, 1);
+        data[tile->data_offset + job.lx * tile->y_span + ly] = (uint16_t)delta;
     }
 }
 
 extern "C" {
-FdSlab* execute_dp_gpu(int sheet_width, int sheet_height, int col_stride, const int32_t* host_defect_prefix, const int32_t* host_F_values, size_t required_map_capacity) {
-    size_t cap = 1;
-    while (cap < required_map_capacity * 2) cap *= 2; 
+void execute_phase_e_gpu_wavefront(FdSlab* slab, int sheet_width, int sheet_height, int col_stride, 
+                                   const int32_t* host_defect_prefix, const int32_t* host_F_values) {
     
-    HashEntry* d_entries;
-    cudaMalloc(&d_entries, cap * sizeof(HashEntry));
-    cudaMemset(d_entries, 0, cap * sizeof(HashEntry)); 
-    GPUMapDevice d_map = {d_entries, cap - 1};
+    // --- THE FIX: GUARD ZERO BYTES ---
+    if (slab->total_data_entries == 0) return;
 
-    int32_t* d_F_values;
-    size_t F_size = (sheet_width + 1) * col_stride * sizeof(int32_t);
-    cudaMalloc(&d_F_values, F_size);
-    cudaMemcpy(d_F_values, host_F_values, F_size, cudaMemcpyHostToDevice);
+    int32_t *d_F_values, *d_defect_prefix;
+    uint8_t *d_has_tiles; TileIndex *d_tile_index; Tile *d_tiles = nullptr;
+    uint16_t *d_data; int *d_overflow_flag;
 
-    DPJob* host_jobs = (DPJob*)malloc(sheet_width * sheet_height * sizeof(DPJob));
+    size_t wh_size = (sheet_width + 1) * col_stride;
+    cudaMalloc(&d_F_values, wh_size * sizeof(int32_t));
+    cudaMemcpy(d_F_values, host_F_values, wh_size * sizeof(int32_t), cudaMemcpyHostToDevice);
+
+    cudaMalloc(&d_defect_prefix, wh_size * sizeof(int32_t));
+    cudaMemcpy(d_defect_prefix, host_defect_prefix, wh_size * sizeof(int32_t), cudaMemcpyHostToDevice);
+
+    cudaMalloc(&d_has_tiles, wh_size * sizeof(uint8_t));
+    cudaMemcpy(d_has_tiles, slab->has_tiles, wh_size * sizeof(uint8_t), cudaMemcpyHostToDevice);
+
+    cudaMalloc(&d_tile_index, wh_size * sizeof(TileIndex));
+    cudaMemcpy(d_tile_index, slab->tile_index, wh_size * sizeof(TileIndex), cudaMemcpyHostToDevice);
+
+    if (slab->total_tile_count > 0) {
+        cudaMalloc(&d_tiles, slab->total_tile_count * sizeof(Tile));
+        cudaMemcpy(d_tiles, slab->tiles, slab->total_tile_count * sizeof(Tile), cudaMemcpyHostToDevice);
+    }
+
+    cudaMalloc(&d_data, slab->total_data_entries * sizeof(uint16_t));
+    
+    cudaMalloc(&d_overflow_flag, sizeof(int));
+    cudaMemset(d_overflow_flag, 0, sizeof(int));
+
+    DPJob* host_jobs = (DPJob*)malloc(sheet_width * sheet_height * 40 * sizeof(DPJob)); 
     DPJob* d_jobs;
-    cudaMalloc(&d_jobs, sheet_width * sheet_height * sizeof(DPJob));
+    cudaMalloc(&d_jobs, sheet_width * sheet_height * 40 * sizeof(DPJob));
 
-    for (int w = 1; w <= sheet_width; w++) {
-        for (int h = 1; h <= sheet_height; h++) {
-            int num_jobs = 0;
-            for (int sx = 0; sx <= sheet_width - w; sx++) {
-                for (int sy = 0; sy <= sheet_height - h; sy++) {
-                    if (defect_count_in_rect(host_defect_prefix, col_stride, sx, sy, sx + w, sy + h) > 0) {
-                        host_jobs[num_jobs++] = { (int16_t)sx, (int16_t)sy };
+    // The Wavefront Loop: Grouping sizes by their perimeter
+    for (int d = 2; d <= sheet_width + sheet_height; d++) {
+        int num_jobs = 0;
+        
+        for (int w = 1; w <= sheet_width; w++) {
+            int h = d - w;
+            if (h >= 1 && h <= sheet_height) {
+                int wh_idx = w * col_stride + h;
+                if (!slab->has_tiles[wh_idx]) continue;
+                
+                const TileIndex* ti = &slab->tile_index[wh_idx];
+                for (int t = 0; t < ti->tile_count; t++) {
+                    const Tile* tile = (t == 0) ? &ti->first_tile_inline : &slab->tiles[ti->overflow_start + t - 1];
+                    for (int lx = 0; lx < tile->x_span; lx++) {
+                        host_jobs[num_jobs++] = { (int16_t)w, (int16_t)h, (int32_t)t, (int16_t)lx };
                     }
                 }
             }
-            if (num_jobs == 0) continue;
-
-            cudaMemcpy(d_jobs, host_jobs, num_jobs * sizeof(DPJob), cudaMemcpyHostToDevice);
-            int32_t pure_val = host_F_values[w * col_stride + h];
-
-            solve_state_kernel<<<num_jobs, 128>>>(d_jobs, num_jobs, w, h, col_stride, d_F_values, pure_val, d_map);
-            cudaDeviceSynchronize(); 
         }
+
+        if (num_jobs == 0) continue;
+        cudaMemcpy(d_jobs, host_jobs, num_jobs * sizeof(DPJob), cudaMemcpyHostToDevice);
+        
+        solve_diagonal_kernel<<<num_jobs, 128>>>(d_jobs, num_jobs, col_stride, d_F_values, d_defect_prefix,
+                                                 d_has_tiles, d_tile_index, d_tiles, d_data, d_overflow_flag);
+        cudaDeviceSynchronize();
     }
 
-    FdSlab* slab = (FdSlab*)calloc(1, sizeof(FdSlab));
-    slab->sheet_width = sheet_width;
-    slab->sheet_height = sheet_height;
-    
-    GPUMap* h_map = (GPUMap*)malloc(sizeof(GPUMap));
-    h_map->capacity = cap;
-    h_map->mask = cap - 1;
-    h_map->count = required_map_capacity; 
-    h_map->entries = (HashEntry*)malloc(cap * sizeof(HashEntry));
+    cudaMemcpy(slab->data, d_data, slab->total_data_entries * sizeof(uint16_t), cudaMemcpyDeviceToHost);
+    cudaMemcpy(&slab->overflow, d_overflow_flag, sizeof(int), cudaMemcpyDeviceToHost);
 
-    cudaMemcpy(h_map->entries, d_entries, cap * sizeof(HashEntry), cudaMemcpyDeviceToHost);
-    slab->map = h_map;
-
-    cudaFree(d_entries);
-    cudaFree(d_F_values);
-    cudaFree(d_jobs);
+    cudaFree(d_F_values); cudaFree(d_defect_prefix); cudaFree(d_has_tiles);
+    cudaFree(d_tile_index); if (d_tiles) cudaFree(d_tiles);
+    cudaFree(d_data); cudaFree(d_overflow_flag); cudaFree(d_jobs);
     free(host_jobs);
-    return slab;
 }
 }

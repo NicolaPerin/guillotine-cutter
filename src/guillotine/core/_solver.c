@@ -5,8 +5,7 @@
 static void fd_slab_destructor(PyObject *capsule) {
     FdSlab *slab = (FdSlab *)PyCapsule_GetPointer(capsule, "FdSlab");
     if (!slab) return;
-    if (slab->map) { free(slab->map->entries); free(slab->map); }
-    free(slab);
+    free(slab->data); free(slab->tile_index); free(slab->has_tiles); free(slab->tiles); free(slab);
 }
 
 static PyObject *py_fill_g(PyObject *Py_UNUSED(self), PyObject *args) {
@@ -45,37 +44,24 @@ static PyObject *py_fill_Fd_slab(PyObject *Py_UNUSED(self), PyObject *args) {
     return PyCapsule_New(slab, "FdSlab", fd_slab_destructor);
 }
 
-// --- ADD THIS MIXING FUNCTION ---
-static inline uint64_t mix_hash_cpu(uint64_t key) {
-    key ^= key >> 33;
-    key *= 0xff51afd7ed558ccdULL;
-    key ^= key >> 33;
-    key *= 0xc4ceb9fe1a85ec53ULL;
-    key ^= key >> 33;
-    return key;
-}
-
 static PyObject *py_fd_slab_lookup(PyObject *Py_UNUSED(self), PyObject *args) {
     PyObject *capsule, *o_F; int sh, rw, rh, sx, sy;
     if (!PyArg_ParseTuple(args, "OOiiiii", &capsule, &o_F, &sh, &rw, &rh, &sx, &sy)) return NULL;
+    
     FdSlab *slab = (FdSlab *)PyCapsule_GetPointer(capsule, "FdSlab");
-    Py_buffer b_F; PyObject_GetBuffer(o_F, &b_F, PyBUF_SIMPLE);
-    int32_t *F_values = (int32_t *)b_F.buf;
-    
-    uint64_t key = ((uint64_t)rw << 48) | ((uint64_t)rh << 32) | ((uint64_t)sx << 16) | (uint64_t)sy;
-    
-    // --- CHANGED: Apply mix_hash before masking ---
-    size_t idx = mix_hash_cpu(key) & slab->map->mask;
-    
-    bool found = false; uint16_t delta;
-    while (1) {
-        uint64_t k = slab->map->entries[idx].key;
-        if (k == key) { delta = slab->map->entries[idx].delta; found = true; break; }
-        if (k == 0) break;
-        idx = (idx + 1) & slab->map->mask;
+    if (!slab) {  // --- THE FIX: SAFETY GUARD ---
+        PyErr_SetString(PyExc_RuntimeError, "Invalid FdSlab capsule");
+        return NULL;
     }
-    int32_t val = found ? F_values[rw * (sh + 1) + rh] - delta : F_values[rw * (sh + 1) + rh];
+
+    Py_buffer b_F; 
+    if (PyObject_GetBuffer(o_F, &b_F, PyBUF_SIMPLE) != 0) return NULL;
+    
+    ColRef cr;
+    resolve_col(&cr, slab, (int32_t*)b_F.buf, sh + 1, rw, rh, sx);
+    int32_t val = colref_get(&cr, sy);
     PyBuffer_Release(&b_F);
+    
     return PyLong_FromLong(val);
 }
 
@@ -83,7 +69,7 @@ static PyObject *py_fd_slab_stats(PyObject *Py_UNUSED(self), PyObject *args) {
     PyObject *c; if (!PyArg_ParseTuple(args, "O", &c)) return NULL;
     FdSlab *slab = (FdSlab*)PyCapsule_GetPointer(c, "FdSlab");
     int64_t dense = (int64_t)(slab->sheet_width + 1) * (slab->sheet_width + 1) * (int64_t)(slab->sheet_height + 1) * (slab->sheet_height + 1);
-    return Py_BuildValue("(LLii)", (long long)(slab->map ? slab->map->count : 0), (long long)dense, 0, slab->overflow);
+    return Py_BuildValue("(LLii)", (long long)slab->total_data_entries, (long long)dense, slab->total_tile_count, slab->overflow);
 }
 
 static PyObject *py_estimate_slab(PyObject *Py_UNUSED(self), PyObject *args) { return Py_BuildValue("(iLiLiL)", 0, 0LL, 0, 0LL, 0, 0LL); }
