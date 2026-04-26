@@ -170,6 +170,10 @@ FdSlab *fill_Fd_slab(int sheet_width, int sheet_height, int32_t *defect_count_pr
     if (data_count > 0) {
         slab->data = malloc(data_count * sizeof(uint16_t));
         execute_phase_e_gpu_wavefront(slab, sheet_width, sheet_height, col_stride, defect_count_prefix, F_values);
+        if (slab->overflow) {
+            fprintf(stderr, "warning: Fd slab delta overflow — one or more deltas exceeded "
+                            "uint16 range and were truncated. Solution quality may be degraded.\n");
+        }
     } else {
         slab->data = NULL;
     }
