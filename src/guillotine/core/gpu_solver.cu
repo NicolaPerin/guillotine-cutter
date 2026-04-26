@@ -28,6 +28,10 @@ struct DPJob {
     int16_t lx;
 };
 
+/* Threads per block for the diagonal kernel. Each thread handles one y-row
+   within the assigned (w, h, sx) column. */
+#define BLOCK_SIZE 128
+
 /*
  * Reading slab->data here is safe even though other kernel launches write to it.
  * A cut at position z only ever reads subproblems smaller than (w, h), which
@@ -126,89 +130,89 @@ __global__ void solve_diagonal_kernel(const DPJob* jobs, int num_jobs, int col_s
 }
 
 extern "C" {
-void execute_phase_e_gpu_wavefront(FdSlab* slab, int sheet_width, int sheet_height, int col_stride, 
-                                   const int32_t* host_defect_prefix, const int32_t* host_F_values) {
-    
-    /* Nothing to compute if no position requires a defect-adjusted value. */
-    if (slab->total_data_entries == 0) return;
-
-    int32_t *d_F_values, *d_defect_prefix;
-    uint8_t *d_has_tiles; TileIndex *d_tile_index; Tile *d_tiles = nullptr;
-    uint16_t *d_data; int *d_overflow_flag;
-
-    size_t wh_size = (sheet_width + 1) * col_stride;
-    CUDA_CHECK(cudaMalloc(&d_F_values, wh_size * sizeof(int32_t)));
-    CUDA_CHECK(cudaMemcpy(d_F_values, host_F_values, wh_size * sizeof(int32_t), cudaMemcpyHostToDevice));
-
-    CUDA_CHECK(cudaMalloc(&d_defect_prefix, wh_size * sizeof(int32_t)));
-    CUDA_CHECK(cudaMemcpy(d_defect_prefix, host_defect_prefix, wh_size * sizeof(int32_t), cudaMemcpyHostToDevice));
-
-    CUDA_CHECK(cudaMalloc(&d_has_tiles, wh_size * sizeof(uint8_t)));
-    CUDA_CHECK(cudaMemcpy(d_has_tiles, slab->has_tiles, wh_size * sizeof(uint8_t), cudaMemcpyHostToDevice));
-
-    CUDA_CHECK(cudaMalloc(&d_tile_index, wh_size * sizeof(TileIndex)));
-    CUDA_CHECK(cudaMemcpy(d_tile_index, slab->tile_index, wh_size * sizeof(TileIndex), cudaMemcpyHostToDevice));
-
-    if (slab->total_tile_count > 0) {
-        CUDA_CHECK(cudaMalloc(&d_tiles, slab->total_tile_count * sizeof(Tile)));
-        CUDA_CHECK(cudaMemcpy(d_tiles, slab->tiles, slab->total_tile_count * sizeof(Tile), cudaMemcpyHostToDevice));
-    }
-
-    CUDA_CHECK(cudaMalloc(&d_data, slab->total_data_entries * sizeof(uint16_t)));
-    
-    CUDA_CHECK(cudaMalloc(&d_overflow_flag, sizeof(int)));
-    CUDA_CHECK(cudaMemset(d_overflow_flag, 0, sizeof(int)));
-
-    /*
-     * On a single diagonal (w + h = d), each (w, h) pair contributes at most
-     * (sheet_width - w + 1) jobs — one per x-column that a tile can occupy.
-     * Summing over all pairs on the widest diagonal gives sheet_width * sheet_height
-     * as a strict upper bound on jobs per diagonal launch.
-     */
-    size_t max_jobs_per_diagonal = (size_t)sheet_width * sheet_height;
-    DPJob* host_jobs = (DPJob*)malloc(max_jobs_per_diagonal * sizeof(DPJob));
-    DPJob* d_jobs;
-    CUDA_CHECK(cudaMalloc(&d_jobs, max_jobs_per_diagonal * sizeof(DPJob)));
-
-    /*
-     * Diagonals are processed in increasing order of w+h. Every cut candidate
-     * for a cell (w, h) references strictly smaller subproblems, so by the time
-     * a diagonal is launched all data it depends on has already been written and
-     * synchronized.
-     */
-    for (int d = 2; d <= sheet_width + sheet_height; d++) {
-        int num_jobs = 0;
+    void execute_phase_e_gpu_wavefront(FdSlab* slab, int sheet_width, int sheet_height, int col_stride, 
+                                    const int32_t* host_defect_prefix, const int32_t* host_F_values) {
         
-        for (int w = 1; w <= sheet_width; w++) {
-            int h = d - w;
-            if (h >= 1 && h <= sheet_height) {
-                int wh_idx = w * col_stride + h;
-                if (!slab->has_tiles[wh_idx]) continue;
-                
-                const TileIndex* ti = &slab->tile_index[wh_idx];
-                for (int t = 0; t < ti->tile_count; t++) {
-                    const Tile* tile = (t == 0) ? &ti->first_tile_inline : &slab->tiles[ti->overflow_start + t - 1];
-                    for (int lx = 0; lx < tile->x_span; lx++) {
-                        host_jobs[num_jobs++] = { (int16_t)w, (int16_t)h, (int32_t)t, (int16_t)lx };
+        /* Nothing to compute if no position requires a defect-adjusted value. */
+        if (slab->total_data_entries == 0) return;
+
+        int32_t *d_F_values, *d_defect_prefix;
+        uint8_t *d_has_tiles; TileIndex *d_tile_index; Tile *d_tiles = nullptr;
+        uint16_t *d_data; int *d_overflow_flag;
+
+        size_t wh_size = (sheet_width + 1) * col_stride;
+        CUDA_CHECK(cudaMalloc(&d_F_values, wh_size * sizeof(int32_t)));
+        CUDA_CHECK(cudaMemcpy(d_F_values, host_F_values, wh_size * sizeof(int32_t), cudaMemcpyHostToDevice));
+
+        CUDA_CHECK(cudaMalloc(&d_defect_prefix, wh_size * sizeof(int32_t)));
+        CUDA_CHECK(cudaMemcpy(d_defect_prefix, host_defect_prefix, wh_size * sizeof(int32_t), cudaMemcpyHostToDevice));
+
+        CUDA_CHECK(cudaMalloc(&d_has_tiles, wh_size * sizeof(uint8_t)));
+        CUDA_CHECK(cudaMemcpy(d_has_tiles, slab->has_tiles, wh_size * sizeof(uint8_t), cudaMemcpyHostToDevice));
+
+        CUDA_CHECK(cudaMalloc(&d_tile_index, wh_size * sizeof(TileIndex)));
+        CUDA_CHECK(cudaMemcpy(d_tile_index, slab->tile_index, wh_size * sizeof(TileIndex), cudaMemcpyHostToDevice));
+
+        if (slab->total_tile_count > 0) {
+            CUDA_CHECK(cudaMalloc(&d_tiles, slab->total_tile_count * sizeof(Tile)));
+            CUDA_CHECK(cudaMemcpy(d_tiles, slab->tiles, slab->total_tile_count * sizeof(Tile), cudaMemcpyHostToDevice));
+        }
+
+        CUDA_CHECK(cudaMalloc(&d_data, slab->total_data_entries * sizeof(uint16_t)));
+        
+        CUDA_CHECK(cudaMalloc(&d_overflow_flag, sizeof(int)));
+        CUDA_CHECK(cudaMemset(d_overflow_flag, 0, sizeof(int)));
+
+        /*
+        * On a single diagonal (w + h = d), each (w, h) pair contributes at most
+        * (sheet_width - w + 1) jobs — one per x-column that a tile can occupy.
+        * Summing over all pairs on the widest diagonal gives sheet_width * sheet_height
+        * as a strict upper bound on jobs per diagonal launch.
+        */
+        size_t max_jobs_per_diagonal = (size_t)sheet_width * sheet_height;
+        DPJob* host_jobs = (DPJob*)malloc(max_jobs_per_diagonal * sizeof(DPJob));
+        DPJob* d_jobs;
+        CUDA_CHECK(cudaMalloc(&d_jobs, max_jobs_per_diagonal * sizeof(DPJob)));
+
+        /*
+        * Diagonals are processed in increasing order of w+h. Every cut candidate
+        * for a cell (w, h) references strictly smaller subproblems, so by the time
+        * a diagonal is launched all data it depends on has already been written and
+        * synchronized.
+        */
+        for (int d = 2; d <= sheet_width + sheet_height; d++) {
+            int num_jobs = 0;
+            
+            for (int w = 1; w <= sheet_width; w++) {
+                int h = d - w;
+                if (h >= 1 && h <= sheet_height) {
+                    int wh_idx = w * col_stride + h;
+                    if (!slab->has_tiles[wh_idx]) continue;
+                    
+                    const TileIndex* ti = &slab->tile_index[wh_idx];
+                    for (int t = 0; t < ti->tile_count; t++) {
+                        const Tile* tile = (t == 0) ? &ti->first_tile_inline : &slab->tiles[ti->overflow_start + t - 1];
+                        for (int lx = 0; lx < tile->x_span; lx++) {
+                            host_jobs[num_jobs++] = { (int16_t)w, (int16_t)h, (int32_t)t, (int16_t)lx };
+                        }
                     }
                 }
             }
+
+            if (num_jobs == 0) continue;
+            CUDA_CHECK(cudaMemcpy(d_jobs, host_jobs, num_jobs * sizeof(DPJob), cudaMemcpyHostToDevice));
+            
+            solve_diagonal_kernel<<<num_jobs, BLOCK_SIZE>>>(d_jobs, num_jobs, col_stride, d_F_values, d_defect_prefix,
+                                                    d_has_tiles, d_tile_index, d_tiles, d_data, d_overflow_flag);
+            CUDA_CHECK(cudaDeviceSynchronize());
         }
 
-        if (num_jobs == 0) continue;
-        CUDA_CHECK(cudaMemcpy(d_jobs, host_jobs, num_jobs * sizeof(DPJob), cudaMemcpyHostToDevice));
-        
-        solve_diagonal_kernel<<<num_jobs, 128>>>(d_jobs, num_jobs, col_stride, d_F_values, d_defect_prefix,
-                                                 d_has_tiles, d_tile_index, d_tiles, d_data, d_overflow_flag);
-        CUDA_CHECK(cudaDeviceSynchronize());
+        CUDA_CHECK(cudaMemcpy(slab->data, d_data, slab->total_data_entries * sizeof(uint16_t), cudaMemcpyDeviceToHost));
+        CUDA_CHECK(cudaMemcpy(&slab->overflow, d_overflow_flag, sizeof(int), cudaMemcpyDeviceToHost));
+
+        CUDA_CHECK(cudaFree(d_F_values)); CUDA_CHECK(cudaFree(d_defect_prefix)); CUDA_CHECK(cudaFree(d_has_tiles));
+        CUDA_CHECK(cudaFree(d_tile_index)); if (d_tiles) CUDA_CHECK(cudaFree(d_tiles));
+        CUDA_CHECK(cudaFree(d_data)); CUDA_CHECK(cudaFree(d_overflow_flag)); CUDA_CHECK(cudaFree(d_jobs));
+        free(host_jobs);
     }
-
-    CUDA_CHECK(cudaMemcpy(slab->data, d_data, slab->total_data_entries * sizeof(uint16_t), cudaMemcpyDeviceToHost));
-    CUDA_CHECK(cudaMemcpy(&slab->overflow, d_overflow_flag, sizeof(int), cudaMemcpyDeviceToHost));
-
-    CUDA_CHECK(cudaFree(d_F_values)); CUDA_CHECK(cudaFree(d_defect_prefix)); CUDA_CHECK(cudaFree(d_has_tiles));
-    CUDA_CHECK(cudaFree(d_tile_index)); if (d_tiles) CUDA_CHECK(cudaFree(d_tiles));
-    CUDA_CHECK(cudaFree(d_data)); CUDA_CHECK(cudaFree(d_overflow_flag)); CUDA_CHECK(cudaFree(d_jobs));
-    free(host_jobs);
-}
 }
