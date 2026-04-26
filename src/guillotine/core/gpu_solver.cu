@@ -20,13 +20,15 @@
 
 extern "C" {
 #include "solver_core.h"
+#include <assert.h>
 }
 
 struct DPJob {
-    int16_t w, h;
+    uint16_t w, h;
     int32_t tile_idx;
-    int16_t lx;
+    uint16_t lx;
 };
+static_assert(sizeof(DPJob) == 12, "DPJob layout changed unexpectedly");
 
 /* Threads per block for the diagonal kernel. Each thread handles one y-row
    within the assigned (w, h, sx) column. */
@@ -135,6 +137,10 @@ extern "C" {
         
         /* Nothing to compute if no position requires a defect-adjusted value. */
         if (slab->total_data_entries == 0) return;
+        if (sheet_width > 65535 || sheet_height > 65535) {
+            fprintf(stderr, "gpu_solver: sheet dimensions exceed uint16_t range in DPJob\n");
+            abort();
+        }
 
         int32_t *d_F_values, *d_defect_prefix;
         uint8_t *d_has_tiles; TileIndex *d_tile_index; Tile *d_tiles = nullptr;
@@ -150,6 +156,7 @@ extern "C" {
         CUDA_CHECK(cudaMalloc(&d_has_tiles, wh_size * sizeof(uint8_t)));
         CUDA_CHECK(cudaMemcpy(d_has_tiles, slab->has_tiles, wh_size * sizeof(uint8_t), cudaMemcpyHostToDevice));
 
+        /* TileIndex embeds a full Tile struct inline (first_tile_inline), so each entry is ~80 bytes. For a 200x200 sheet this transfer is ~3 MB. */
         CUDA_CHECK(cudaMalloc(&d_tile_index, wh_size * sizeof(TileIndex)));
         CUDA_CHECK(cudaMemcpy(d_tile_index, slab->tile_index, wh_size * sizeof(TileIndex), cudaMemcpyHostToDevice));
 
@@ -157,6 +164,11 @@ extern "C" {
             CUDA_CHECK(cudaMalloc(&d_tiles, slab->total_tile_count * sizeof(Tile)));
             CUDA_CHECK(cudaMemcpy(d_tiles, slab->tiles, slab->total_tile_count * sizeof(Tile), cudaMemcpyHostToDevice));
         }
+
+        /* d_tiles is nullptr when total_tile_count == 0. This is safe as long as no
+        * tile has tile_count > 1, which is guaranteed by the slab construction in
+        * fill_Fd_slab. Assert here to catch any future violation immediately. */
+        assert(d_tiles != nullptr || slab->total_tile_count == 0);
 
         CUDA_CHECK(cudaMalloc(&d_data, slab->total_data_entries * sizeof(uint16_t)));
         
@@ -193,7 +205,7 @@ extern "C" {
                     for (int t = 0; t < ti->tile_count; t++) {
                         const Tile* tile = (t == 0) ? &ti->first_tile_inline : &slab->tiles[ti->overflow_start + t - 1];
                         for (int lx = 0; lx < tile->x_span; lx++) {
-                            host_jobs[num_jobs++] = { (int16_t)w, (int16_t)h, (int32_t)t, (int16_t)lx };
+                            host_jobs[num_jobs++] = { (uint16_t)w, (uint16_t)h, (int32_t)t, (uint16_t)lx };
                         }
                     }
                 }
