@@ -72,13 +72,23 @@ static PyObject *py_fd_slab_stats(PyObject *Py_UNUSED(self), PyObject *args) {
     return Py_BuildValue("(LLii)", (long long)slab->total_data_entries, (long long)dense, slab->total_tile_count, slab->overflow);
 }
 
-static PyObject *py_estimate_slab(PyObject *Py_UNUSED(self), PyObject *args) { return Py_BuildValue("(iLiLiL)", 0, 0LL, 0, 0LL, 0, 0LL); }
-
 static PyMethodDef SolverMethods[] = {
-    {"fill_g", py_fill_g, METH_VARARGS, ""}, {"fill_F", py_fill_F, METH_VARARGS, ""},
-    {"fill_Fd_slab", py_fill_Fd_slab, METH_VARARGS, ""}, {"fd_slab_lookup", py_fd_slab_lookup, METH_VARARGS, ""},
-    {"fd_slab_stats", py_fd_slab_stats, METH_VARARGS, ""}, {"estimate_slab", py_estimate_slab, METH_VARARGS, ""}, {NULL, NULL, 0, NULL}
+    {"fill_g", py_fill_g, METH_VARARGS, ""}, 
+    {"fill_F", py_fill_F, METH_VARARGS, ""},
+    {"fill_Fd_slab", py_fill_Fd_slab, METH_VARARGS, ""}, 
+    {"fd_slab_lookup", py_fd_slab_lookup, METH_VARARGS, ""},
+    {"fd_slab_stats", py_fd_slab_stats, METH_VARARGS, ""}, 
+    {NULL, NULL, 0, NULL}
 };
 
-static struct PyModuleDef solvermodule = { PyModuleDef_HEAD_INIT, "_solver", "", -1, SolverMethods, NULL, NULL, NULL, NULL };
+static struct PyModuleDef solvermodule = { 
+    PyModuleDef_HEAD_INIT, 
+    "_solver", "", 
+    -1, SolverMethods, 
+    NULL, 
+    NULL, 
+    NULL, 
+    NULL 
+};
+
 PyMODINIT_FUNC PyInit__solver(void) { return PyModule_Create(&solvermodule); }

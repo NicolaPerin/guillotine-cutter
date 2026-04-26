@@ -92,12 +92,9 @@ static inline int32_t colref_get(ColRef *cr, int sy) {
     return cr->pure_val;
 }
 
-typedef struct { int tiles_1dx, tiles_1dy, tiles_2d; int64_t data_1dx, data_1dy, data_2d; } SlabEstimate;
-
 void fill_g_table(int sheet_width, int sheet_height, int32_t *g_values, int32_t *g_item_index, int32_t *item_widths, int32_t *item_heights, int32_t *item_areas, int n_items);
 void fill_F_table(int sheet_width, int sheet_height, int32_t *g_values, int32_t *g_item_index, int32_t *F_values, int8_t *F_decision_type, int32_t *F_decision_param, int32_t *normal_cuts_x, int32_t *n_normal_cuts_x, int max_x_cuts, int32_t *normal_cuts_y, int32_t *n_normal_cuts_y, int max_y_cuts);
 FdSlab *fill_Fd_slab(int sheet_width, int sheet_height, int32_t *defect_count_prefix, int32_t *F_values, int32_t *defect_array_in, int n_defects);
-SlabEstimate estimate_slab(int sheet_width, int sheet_height, int32_t *defect_array_in, int n_defects);
 
 // GPU execution hook
 void execute_phase_e_gpu_wavefront(FdSlab* slab, int sheet_width, int sheet_height, int col_stride, const int32_t* host_defect_prefix, const int32_t* host_F_values);
