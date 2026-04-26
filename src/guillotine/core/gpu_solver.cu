@@ -28,7 +28,11 @@ struct DPJob {
     int16_t lx;
 };
 
-// Device-side Column Resolver (Matches CPU logic exactly)
+/*
+ * Reading slab->data here is safe even though other kernel launches write to it.
+ * A cut at position z only ever reads subproblems smaller than (w, h), which
+ * were computed in a previous diagonal and fully flushed by cudaDeviceSynchronize.
+ */
 __device__ void resolve_col_device(ColRef* cr, int w, int h, int sx, 
                                    const int32_t* F_values, int col_stride,
                                    const uint8_t* has_tiles, const TileIndex* tile_index,
@@ -166,7 +170,12 @@ void execute_phase_e_gpu_wavefront(FdSlab* slab, int sheet_width, int sheet_heig
     DPJob* d_jobs;
     CUDA_CHECK(cudaMalloc(&d_jobs, max_jobs_per_diagonal * sizeof(DPJob)));
 
-    // The Wavefront Loop: Grouping sizes by their perimeter
+    /*
+     * Diagonals are processed in increasing order of w+h. Every cut candidate
+     * for a cell (w, h) references strictly smaller subproblems, so by the time
+     * a diagonal is launched all data it depends on has already been written and
+     * synchronized.
+     */
     for (int d = 2; d <= sheet_width + sheet_height; d++) {
         int num_jobs = 0;
         
