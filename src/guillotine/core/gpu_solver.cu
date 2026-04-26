@@ -2,6 +2,22 @@
 #include <stdint.h>
 #include <stdio.h>
 
+/*
+ * Aborts with a descriptive message if a CUDA API call returns an error.
+ * Every CUDA call in this file is wrapped with this macro so that GPU-side
+ * failures (out-of-memory, invalid device pointer, kernel errors surfaced by
+ * cudaDeviceSynchronize, etc.) are caught immediately rather than silently
+ * producing wrong results or crashing later at an unrelated site.
+ */
+#define CUDA_CHECK(call) do { \
+    cudaError_t _err = (call); \
+    if (_err != cudaSuccess) { \
+        fprintf(stderr, "CUDA error at %s:%d: %s\n", \
+                __FILE__, __LINE__, cudaGetErrorString(_err)); \
+        abort(); \
+    } \
+} while(0)
+
 extern "C" {
 #include "solver_core.h"
 }
@@ -117,31 +133,31 @@ void execute_phase_e_gpu_wavefront(FdSlab* slab, int sheet_width, int sheet_heig
     uint16_t *d_data; int *d_overflow_flag;
 
     size_t wh_size = (sheet_width + 1) * col_stride;
-    cudaMalloc(&d_F_values, wh_size * sizeof(int32_t));
-    cudaMemcpy(d_F_values, host_F_values, wh_size * sizeof(int32_t), cudaMemcpyHostToDevice);
+    CUDA_CHECK(cudaMalloc(&d_F_values, wh_size * sizeof(int32_t)));
+    CUDA_CHECK(cudaMemcpy(d_F_values, host_F_values, wh_size * sizeof(int32_t), cudaMemcpyHostToDevice));
 
-    cudaMalloc(&d_defect_prefix, wh_size * sizeof(int32_t));
-    cudaMemcpy(d_defect_prefix, host_defect_prefix, wh_size * sizeof(int32_t), cudaMemcpyHostToDevice);
+    CUDA_CHECK(cudaMalloc(&d_defect_prefix, wh_size * sizeof(int32_t)));
+    CUDA_CHECK(cudaMemcpy(d_defect_prefix, host_defect_prefix, wh_size * sizeof(int32_t), cudaMemcpyHostToDevice));
 
-    cudaMalloc(&d_has_tiles, wh_size * sizeof(uint8_t));
-    cudaMemcpy(d_has_tiles, slab->has_tiles, wh_size * sizeof(uint8_t), cudaMemcpyHostToDevice);
+    CUDA_CHECK(cudaMalloc(&d_has_tiles, wh_size * sizeof(uint8_t)));
+    CUDA_CHECK(cudaMemcpy(d_has_tiles, slab->has_tiles, wh_size * sizeof(uint8_t), cudaMemcpyHostToDevice));
 
-    cudaMalloc(&d_tile_index, wh_size * sizeof(TileIndex));
-    cudaMemcpy(d_tile_index, slab->tile_index, wh_size * sizeof(TileIndex), cudaMemcpyHostToDevice);
+    CUDA_CHECK(cudaMalloc(&d_tile_index, wh_size * sizeof(TileIndex)));
+    CUDA_CHECK(cudaMemcpy(d_tile_index, slab->tile_index, wh_size * sizeof(TileIndex), cudaMemcpyHostToDevice));
 
     if (slab->total_tile_count > 0) {
-        cudaMalloc(&d_tiles, slab->total_tile_count * sizeof(Tile));
-        cudaMemcpy(d_tiles, slab->tiles, slab->total_tile_count * sizeof(Tile), cudaMemcpyHostToDevice);
+        CUDA_CHECK(cudaMalloc(&d_tiles, slab->total_tile_count * sizeof(Tile)));
+        CUDA_CHECK(cudaMemcpy(d_tiles, slab->tiles, slab->total_tile_count * sizeof(Tile), cudaMemcpyHostToDevice));
     }
 
-    cudaMalloc(&d_data, slab->total_data_entries * sizeof(uint16_t));
+    CUDA_CHECK(cudaMalloc(&d_data, slab->total_data_entries * sizeof(uint16_t)));
     
-    cudaMalloc(&d_overflow_flag, sizeof(int));
-    cudaMemset(d_overflow_flag, 0, sizeof(int));
+    CUDA_CHECK(cudaMalloc(&d_overflow_flag, sizeof(int)));
+    CUDA_CHECK(cudaMemset(d_overflow_flag, 0, sizeof(int)));
 
     DPJob* host_jobs = (DPJob*)malloc(sheet_width * sheet_height * 40 * sizeof(DPJob)); 
     DPJob* d_jobs;
-    cudaMalloc(&d_jobs, sheet_width * sheet_height * 40 * sizeof(DPJob));
+    CUDA_CHECK(cudaMalloc(&d_jobs, sheet_width * sheet_height * 40 * sizeof(DPJob)));
 
     // The Wavefront Loop: Grouping sizes by their perimeter
     for (int d = 2; d <= sheet_width + sheet_height; d++) {
@@ -164,19 +180,19 @@ void execute_phase_e_gpu_wavefront(FdSlab* slab, int sheet_width, int sheet_heig
         }
 
         if (num_jobs == 0) continue;
-        cudaMemcpy(d_jobs, host_jobs, num_jobs * sizeof(DPJob), cudaMemcpyHostToDevice);
+        CUDA_CHECK(cudaMemcpy(d_jobs, host_jobs, num_jobs * sizeof(DPJob), cudaMemcpyHostToDevice));
         
         solve_diagonal_kernel<<<num_jobs, 128>>>(d_jobs, num_jobs, col_stride, d_F_values, d_defect_prefix,
                                                  d_has_tiles, d_tile_index, d_tiles, d_data, d_overflow_flag);
-        cudaDeviceSynchronize();
+        CUDA_CHECK(cudaDeviceSynchronize());
     }
 
-    cudaMemcpy(slab->data, d_data, slab->total_data_entries * sizeof(uint16_t), cudaMemcpyDeviceToHost);
-    cudaMemcpy(&slab->overflow, d_overflow_flag, sizeof(int), cudaMemcpyDeviceToHost);
+    CUDA_CHECK(cudaMemcpy(slab->data, d_data, slab->total_data_entries * sizeof(uint16_t), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(&slab->overflow, d_overflow_flag, sizeof(int), cudaMemcpyDeviceToHost));
 
-    cudaFree(d_F_values); cudaFree(d_defect_prefix); cudaFree(d_has_tiles);
-    cudaFree(d_tile_index); if (d_tiles) cudaFree(d_tiles);
-    cudaFree(d_data); cudaFree(d_overflow_flag); cudaFree(d_jobs);
+    CUDA_CHECK(cudaFree(d_F_values)); CUDA_CHECK(cudaFree(d_defect_prefix)); CUDA_CHECK(cudaFree(d_has_tiles));
+    CUDA_CHECK(cudaFree(d_tile_index)); if (d_tiles) CUDA_CHECK(cudaFree(d_tiles));
+    CUDA_CHECK(cudaFree(d_data)); CUDA_CHECK(cudaFree(d_overflow_flag)); CUDA_CHECK(cudaFree(d_jobs));
     free(host_jobs);
 }
 }
