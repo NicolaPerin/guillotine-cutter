@@ -125,7 +125,7 @@ extern "C" {
 void execute_phase_e_gpu_wavefront(FdSlab* slab, int sheet_width, int sheet_height, int col_stride, 
                                    const int32_t* host_defect_prefix, const int32_t* host_F_values) {
     
-    // --- THE FIX: GUARD ZERO BYTES ---
+    /* Nothing to compute if no position requires a defect-adjusted value. */
     if (slab->total_data_entries == 0) return;
 
     int32_t *d_F_values, *d_defect_prefix;
@@ -155,9 +155,16 @@ void execute_phase_e_gpu_wavefront(FdSlab* slab, int sheet_width, int sheet_heig
     CUDA_CHECK(cudaMalloc(&d_overflow_flag, sizeof(int)));
     CUDA_CHECK(cudaMemset(d_overflow_flag, 0, sizeof(int)));
 
-    DPJob* host_jobs = (DPJob*)malloc(sheet_width * sheet_height * 40 * sizeof(DPJob)); 
+    /*
+     * On a single diagonal (w + h = d), each (w, h) pair contributes at most
+     * (sheet_width - w + 1) jobs — one per x-column that a tile can occupy.
+     * Summing over all pairs on the widest diagonal gives sheet_width * sheet_height
+     * as a strict upper bound on jobs per diagonal launch.
+     */
+    size_t max_jobs_per_diagonal = (size_t)sheet_width * sheet_height;
+    DPJob* host_jobs = (DPJob*)malloc(max_jobs_per_diagonal * sizeof(DPJob));
     DPJob* d_jobs;
-    CUDA_CHECK(cudaMalloc(&d_jobs, sheet_width * sheet_height * 40 * sizeof(DPJob)));
+    CUDA_CHECK(cudaMalloc(&d_jobs, max_jobs_per_diagonal * sizeof(DPJob)));
 
     // The Wavefront Loop: Grouping sizes by their perimeter
     for (int d = 2; d <= sheet_width + sheet_height; d++) {
