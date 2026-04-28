@@ -94,8 +94,10 @@ static inline int32_t colref_get(ColRef *cr, int sy) {
 
 void fill_g_table(int sheet_width, int sheet_height, int32_t *g_values, int32_t *g_item_index, int32_t *item_widths, int32_t *item_heights, int32_t *item_areas, int n_items);
 void fill_F_table(int sheet_width, int sheet_height, int32_t *g_values, int32_t *g_item_index, int32_t *F_values, int8_t *F_decision_type, int32_t *F_decision_param, int32_t *normal_cuts_x, int32_t *n_normal_cuts_x, int max_x_cuts, int32_t *normal_cuts_y, int32_t *n_normal_cuts_y, int max_y_cuts);
-FdSlab *fill_Fd_slab(int sheet_width, int sheet_height, int32_t *defect_count_prefix, int32_t *F_values, int32_t *defect_array_in, int n_defects);
-
+FdSlab *fill_Fd_slab(int sheet_width, int sheet_height,
+                     int32_t *defect_count_prefix, int32_t *F_values,
+                     int32_t *defect_array_in, int n_defects,
+                     int min_w, int min_h);
 // GPU execution hook
 void execute_phase_e_gpu_wavefront(FdSlab* slab, int sheet_width, int sheet_height, int col_stride, const int32_t* host_defect_prefix, const int32_t* host_F_values);
 

@@ -110,7 +110,10 @@ void fill_F_table(int sheet_width, int sheet_height, int32_t *g_values, int32_t 
     }
 }
 
-FdSlab *fill_Fd_slab(int sheet_width, int sheet_height, int32_t *defect_count_prefix, int32_t *F_values, int32_t *defect_array_in, int n_defects) {
+FdSlab *fill_Fd_slab(int sheet_width, int sheet_height,
+                     int32_t *defect_count_prefix, int32_t *F_values,
+                     int32_t *defect_array_in, int n_defects,
+                     int min_w, int min_h) {
     int col_stride = sheet_height + 1;
     int wh_count = (sheet_width + 1) * col_stride;
     
@@ -137,8 +140,8 @@ FdSlab *fill_Fd_slab(int sheet_width, int sheet_height, int32_t *defect_count_pr
     int t_count = 0;
     int64_t data_count = 0;
 
-    for (int w = 1; w <= sheet_width; w++) {
-        for (int h = 1; h <= sheet_height; h++) {
+    for (int w = min_w; w <= sheet_width; w++) {
+        for (int h = min_h; h <= sheet_height; h++) {
             int wh_idx = w * col_stride + h;
             int local_t_start = t_count;
             

@@ -35,11 +35,13 @@ static PyObject *py_fill_F(PyObject *Py_UNUSED(self), PyObject *args) {
 }
 
 static PyObject *py_fill_Fd_slab(PyObject *Py_UNUSED(self), PyObject *args) {
-    int sw, sh, n; PyObject *op, *of, *od;
-    if (!PyArg_ParseTuple(args, "iiOOOi", &sw, &sh, &op, &of, &od, &n)) return NULL;
+    int sw, sh, n, min_w, min_h; PyObject *op, *of, *od;
+    if (!PyArg_ParseTuple(args, "iiOOOiii", &sw, &sh, &op, &of, &od, &n, &min_w, &min_h)) return NULL;
     Py_buffer bp, bf, bd;
-    PyObject_GetBuffer(op, &bp, PyBUF_SIMPLE); PyObject_GetBuffer(of, &bf, PyBUF_SIMPLE); PyObject_GetBuffer(od, &bd, PyBUF_SIMPLE);
-    FdSlab *slab = fill_Fd_slab(sw, sh, (int32_t*)bp.buf, (int32_t*)bf.buf, (int32_t*)bd.buf, n);
+    PyObject_GetBuffer(op, &bp, PyBUF_SIMPLE);
+    PyObject_GetBuffer(of, &bf, PyBUF_SIMPLE);
+    PyObject_GetBuffer(od, &bd, PyBUF_SIMPLE);
+    FdSlab *slab = fill_Fd_slab(sw, sh, (int32_t*)bp.buf, (int32_t*)bf.buf, (int32_t*)bd.buf, n, min_w, min_h);
     PyBuffer_Release(&bp); PyBuffer_Release(&bf); PyBuffer_Release(&bd);
     return PyCapsule_New(slab, "FdSlab", fd_slab_destructor);
 }

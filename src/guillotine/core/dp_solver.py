@@ -99,11 +99,14 @@ class GuillotineDP:
         """Fill defected rectangle DP table using multi-tile slab storage."""
         try:
             from guillotine.core import _solver
+            min_w = int(self.item_w.min())
+            min_h = int(self.item_h.min())
             self._fd_slab = _solver.fill_Fd_slab(
                 self.W0, self.H0,
                 self.geom.prefix, self.F_values,
                 self.geom.defects_arr,
                 self.geom.n_def,
+                min_w, min_h,
             )
             slab_entries, dense_entries, n_tiles, overflow = _solver.fd_slab_stats(self._fd_slab)
             if overflow:
