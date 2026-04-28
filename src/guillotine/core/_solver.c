@@ -160,32 +160,14 @@ static PyObject *py_fill_F(PyObject *Py_UNUSED(self), PyObject *args) {
  *          The capsule destructor frees all slab memory when collected.
  * ============================================================================= */
 static PyObject *py_fill_Fd_slab(PyObject *Py_UNUSED(self), PyObject *args) {
-    int sheet_width, sheet_height, n_defects;
-    PyObject *o_prefix, *o_F, *o_defects;
-
-    if (!PyArg_ParseTuple(args, "iiOOOi",
-            &sheet_width, &sheet_height,
-            &o_prefix, &o_F,
-            &o_defects,
-            &n_defects))
-        return NULL;
-
-    Py_buffer b_prefix, b_F, b_defects;
-    if (PyObject_GetBuffer(o_prefix,  &b_prefix,  PyBUF_SIMPLE) < 0 ||
-        PyObject_GetBuffer(o_F,       &b_F,       PyBUF_SIMPLE) < 0 ||
-        PyObject_GetBuffer(o_defects, &b_defects, PyBUF_SIMPLE) < 0)
-        return NULL;
-
-    FdSlab *slab = fill_Fd_slab(
-        sheet_width, sheet_height,
-        (int32_t *)b_prefix.buf,
-        (int32_t *)b_F.buf,
-        (int32_t *)b_defects.buf, n_defects);
-
-    PyBuffer_Release(&b_prefix);
-    PyBuffer_Release(&b_F);
-    PyBuffer_Release(&b_defects);
-
+    int sw, sh, n, min_w, min_h; PyObject *op, *of, *od;
+    if (!PyArg_ParseTuple(args, "iiOOOiii", &sw, &sh, &op, &of, &od, &n, &min_w, &min_h)) return NULL;
+    Py_buffer bp, bf, bd;
+    PyObject_GetBuffer(op, &bp, PyBUF_SIMPLE);
+    PyObject_GetBuffer(of, &bf, PyBUF_SIMPLE);
+    PyObject_GetBuffer(od, &bd, PyBUF_SIMPLE);
+    FdSlab *slab = fill_Fd_slab(sw, sh, (int32_t*)bp.buf, (int32_t*)bf.buf, (int32_t*)bd.buf, n, min_w, min_h);
+    PyBuffer_Release(&bp); PyBuffer_Release(&bf); PyBuffer_Release(&bd);
     return PyCapsule_New(slab, "FdSlab", fd_slab_destructor);
 }
 

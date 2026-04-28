@@ -477,7 +477,8 @@ static void phase_e_fill(int sheet_width, int sheet_height,
  * ============================================================================= */
 FdSlab *fill_Fd_slab(int sheet_width, int sheet_height,
                      int32_t *defect_count_prefix, int32_t *F_values,
-                     int32_t *defect_array_in, int n_defects) {
+                     int32_t *defect_array_in, int n_defects,
+                     int min_w, int min_h) {
 
     int col_stride = sheet_height + 1;
 
@@ -563,8 +564,8 @@ FdSlab *fill_Fd_slab(int sheet_width, int sheet_height,
     int     overflow_cursor = 0; /* next free slot in slab->tiles[]  */
     int64_t data_total      = 0; /* total elements needed in data[]  */
 
-    for (int w = 1; w <= sheet_width; w++) {
-        for (int h = 1; h <= sheet_height; h++) {
+    for (int w = min_w; w <= sheet_width; w++) {
+        for (int h = min_h; h <= sheet_height; h++) {
             int wh_idx  = w * col_stride + h;
             int n_tiles = build_tiles(w, h, sheet_width, sheet_height,
                                       defects, n_defects,

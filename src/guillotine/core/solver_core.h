@@ -170,7 +170,8 @@ void fill_F_table(int sheet_width, int sheet_height,
 
 FdSlab *fill_Fd_slab(int sheet_width, int sheet_height,
                      int32_t *defect_count_prefix, int32_t *F_values,
-                     int32_t *defect_array_in, int n_defects);
+                     int32_t *defect_array_in, int n_defects,
+                     int min_w, int min_h);
 
 SlabEstimate estimate_slab(int sheet_width, int sheet_height,
                            int32_t *defect_array, int n_defects);
