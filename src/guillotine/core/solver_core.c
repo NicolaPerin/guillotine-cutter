@@ -240,7 +240,7 @@ void fill_pure_table(int sheet_width, int sheet_height,
  * ============================================================================= */
 void fill_defect_slab_cpu(DefectSlab *slab, int sheet_width, int sheet_height,
                            int col_stride, int32_t *defect_count_prefix,
-                           int32_t *pure_values) {
+                           int32_t *pure_values, int d_start) {
     int      nthreads       = omp_get_max_threads();
     int32_t *col_best_pool  = (int32_t *)malloc(nthreads * sheet_height * sizeof(int32_t));
     uint8_t *is_impure_pool = (uint8_t *)malloc(nthreads * sheet_height * sizeof(uint8_t));
@@ -248,6 +248,9 @@ void fill_defect_slab_cpu(DefectSlab *slab, int sheet_width, int sheet_height,
     for (int w = 1; w <= sheet_width; w++) {
         int wbase = w * col_stride;
         for (int h = 1; h <= sheet_height; h++) {
+            /* Skip cells already filled by the GPU. */
+            if (w + h < d_start) continue;
+
             int wh_idx = wbase + h;
             if (!slab->has_tiles[wh_idx]) continue;
 
@@ -385,7 +388,7 @@ DefectSlab *fill_defect_slab(int sheet_width, int sheet_height,
     int               t_count   = 0;
     int64_t           data_count = 0;
 
-    /* --- Phase B: tile geometry and data offsets --- */
+    /* --- Phase B: tile geometry --- */
     for (int w = min_w; w <= sheet_width; w++) {
         for (int h = min_h; h <= sheet_height; h++) {
             int wh_idx        = w * col_stride + h;
@@ -399,11 +402,10 @@ DefectSlab *fill_defect_slab(int sheet_width, int sheet_height,
             slab->has_tiles[wh_idx]             = 1;
             slab->tile_index[wh_idx].tile_count = local_tiles;
 
-            for (int i = 0; i < local_tiles; i++) {
-                temp_tiles[local_t_start + i].data_offset = data_count;
+            /* Count data entries — offsets assigned in diagonal order below. */
+            for (int i = 0; i < local_tiles; i++)
                 data_count += (int64_t)temp_tiles[local_t_start + i].x_span
                             * temp_tiles[local_t_start + i].y_span;
-            }
 
             /* Store tile 0 inline; remaining tiles go into the overflow array. */
             slab->tile_index[wh_idx].first_tile_inline = temp_tiles[local_t_start];
@@ -416,8 +418,37 @@ DefectSlab *fill_defect_slab(int sheet_width, int sheet_height,
 
     slab->total_tile_count   = t_count;
     slab->total_data_entries = data_count;
-    slab->tiles              = temp_tiles;
+    slab->tiles              = temp_tiles;  /* must be set before Phase B.5 */
     slab->overflow           = 0;
+
+    /* --- Phase B.5: assign data_offset in diagonal order ---
+     *
+     * Offsets are assigned here rather than in Phase B so that tiles on
+     * earlier diagonals always have smaller offsets than tiles on later
+     * diagonals. This guarantees that d_data[0..diag_data_end[d_cutoff]-1]
+     * is a self-contained region covering exactly the tiles the GPU fills,
+     * with no gaps or out-of-bounds accesses from resolve_col_device. */
+    int max_d = sheet_width + sheet_height;
+    int64_t *diag_data_end = (int64_t *)calloc(max_d + 1, sizeof(int64_t));
+    int64_t running = 0;
+
+    for (int d = 2; d <= max_d; d++) {
+        for (int w = min_w; w <= sheet_width; w++) {
+            int h = d - w;
+            if (h < min_h || h > sheet_height) continue;
+            int wh_idx = w * col_stride + h;
+            if (!slab->has_tiles[wh_idx]) continue;
+            TileIndex *ti = &slab->tile_index[wh_idx];
+            for (int t = 0; t < ti->tile_count; t++) {
+                Tile *tile = (t == 0)
+                    ? &ti->first_tile_inline
+                    : &slab->tiles[ti->overflow_start + t - 1];
+                tile->data_offset = running;
+                running += (int64_t)tile->x_span * tile->y_span;
+            }
+        }
+        diag_data_end[d] = running;
+    }
 
     /* --- Phase C: allocate delta array --- */
     if (data_count == 0) {
@@ -430,15 +461,17 @@ DefectSlab *fill_defect_slab(int sheet_width, int sheet_height,
 
     /* --- Phase D: fill --- */
 #ifdef HAVE_CUDA
-    if (!fill_defect_slab_gpu(slab, sheet_width, sheet_height, col_stride,
-                               defect_count_prefix, pure_values)) {
+    int d_cutoff = fill_defect_slab_gpu(slab, sheet_width, sheet_height,
+                                         col_stride, defect_count_prefix,
+                                         pure_values, diag_data_end, max_d);
+    if (d_cutoff < max_d)
         fill_defect_slab_cpu(slab, sheet_width, sheet_height, col_stride,
-                             defect_count_prefix, pure_values);
-    }
+                             defect_count_prefix, pure_values, d_cutoff + 1);
 #else
     fill_defect_slab_cpu(slab, sheet_width, sheet_height, col_stride,
-                         defect_count_prefix, pure_values);
+                         defect_count_prefix, pure_values, 2);
 #endif
+    free(diag_data_end);
 
     if (slab->overflow)
         fprintf(stderr, "warning: defect slab delta overflow — one or more deltas "

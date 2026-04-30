@@ -191,12 +191,13 @@ DefectSlab *fill_defect_slab(int sheet_width, int sheet_height,
 /* CPU implementation of the defect slab fill (OpenMP, sequential wh order). */
 void fill_defect_slab_cpu(DefectSlab *slab, int sheet_width, int sheet_height,
                            int col_stride, int32_t *defect_count_prefix,
-                           int32_t *pure_values);
+                           int32_t *pure_values, int d_start);
 
 /* GPU implementation of the defect slab fill (CUDA diagonal wavefront). */
 #ifdef HAVE_CUDA
 int fill_defect_slab_gpu(DefectSlab *slab, int sheet_width, int sheet_height,
-                           int col_stride, const int32_t *defect_count_prefix,
-                           const int32_t *pure_values);
+                          int col_stride, const int32_t *host_defect_prefix,
+                          const int32_t *host_pure_values,
+                          const int64_t *diag_data_end, int max_d);
 #endif
 #endif

@@ -188,16 +188,22 @@ __global__ void solve_diagonal_kernel(const SlabFillJob *jobs, int num_jobs,
  * smaller perimeter, so its value is already written and visible before
  * this diagonal launches.
  *
- * Each job covers one (w, h, tile, lx) column — the same granularity as
- * the CPU implementation in fill_defect_slab_cpu.
+ * If the full slab does not fit in available VRAM, fills as many diagonals
+ * as possible within the budget (with 15% headroom), transfers the partial
+ * result back, and returns d_cutoff — the last diagonal filled. The caller
+ * is responsible for completing the remaining diagonals on the CPU.
+ *
+ * Returns max_d if the entire slab was filled on the GPU, or d_cutoff < max_d
+ * if the CPU must complete diagonals d_cutoff+1 through max_d.
  * ============================================================================= */
 extern "C" {
     int fill_defect_slab_gpu(DefectSlab *slab, int sheet_width, int sheet_height,
                             int col_stride, const int32_t *host_defect_prefix,
-                            const int32_t *host_pure_values) {
+                            const int32_t *host_pure_values,
+                            const int64_t *diag_data_end, int max_d) {
 
         /* Nothing to compute if no position requires a defect-adjusted value. */
-        if (slab->total_data_entries == 0) return 1;
+        if (slab->total_data_entries == 0) return max_d;
 
         if (sheet_width > 65535 || sheet_height > 65535) {
             fprintf(stderr, "fill_defect_slab_gpu: sheet dimensions exceed "
@@ -208,11 +214,23 @@ extern "C" {
         size_t free_mem, total_mem;
         CUDA_CHECK(cudaMemGetInfo(&free_mem, &total_mem));
         size_t required = slab->total_data_entries * sizeof(uint16_t);
-        if (required > free_mem) {
-            fprintf(stderr, "warning: insufficient VRAM (%zu MB required, %zu MB free) "
-                            "— falling back to CPU\n",
-                    required >> 20, free_mem >> 20);
-            return 0;
+        size_t budget   = (size_t)((double)free_mem * 0.85);
+
+        /* Find the last diagonal whose cumulative data fits within the budget.
+        * diag_data_end[d] is the total number of uint16 entries written by
+        * diagonals 2..d, computed precisely during Phase B of slab construction. */
+        int d_cutoff = max_d;
+        if (required > budget) {
+            d_cutoff = 1;
+            for (int d = 2; d <= max_d; d++) {
+                if ((size_t)(diag_data_end[d]) * sizeof(uint16_t) <= budget)
+                    d_cutoff = d;
+                else
+                    break;
+            }
+            fprintf(stderr, "warning: slab (%zu MB) exceeds VRAM budget (%zu MB) — "
+                            "GPU fills diagonals 2..%d, CPU completes %d..%d\n",
+                    required >> 20, budget >> 20, d_cutoff, d_cutoff + 1, max_d);
         }
 
         int32_t   *d_pure_values, *d_defect_prefix;
@@ -222,7 +240,8 @@ extern "C" {
         uint16_t  *d_data;
         int       *d_overflow_flag;
 
-        size_t wh_size = (size_t)(sheet_width + 1) * col_stride;
+        size_t wh_size      = (size_t)(sheet_width + 1) * col_stride;
+        size_t data_to_fill = (size_t)diag_data_end[d_cutoff] * sizeof(uint16_t);
 
         CUDA_CHECK(cudaMalloc(&d_pure_values, wh_size * sizeof(int32_t)));
         CUDA_CHECK(cudaMemcpy(d_pure_values, host_pure_values,
@@ -254,7 +273,8 @@ extern "C" {
         * Assert here to catch any future violation immediately. */
         assert(d_tiles != nullptr || slab->total_tile_count == 0);
 
-        CUDA_CHECK(cudaMalloc(&d_data, slab->total_data_entries * sizeof(uint16_t)));
+        /* Allocate only the portion of d_data that the GPU will fill. */
+        CUDA_CHECK(cudaMalloc(&d_data, data_to_fill));
         CUDA_CHECK(cudaMalloc(&d_overflow_flag, sizeof(int)));
         CUDA_CHECK(cudaMemset(d_overflow_flag, 0, sizeof(int)));
 
@@ -264,18 +284,18 @@ extern "C" {
         * Summing over all pairs on the widest diagonal gives sheet_width *
         * sheet_height as a strict upper bound on jobs per diagonal launch.
         */
-        size_t       max_jobs = (size_t)sheet_width * sheet_height;
+        size_t       max_jobs  = (size_t)sheet_width * sheet_height;
         SlabFillJob *host_jobs = (SlabFillJob *)malloc(max_jobs * sizeof(SlabFillJob));
         SlabFillJob *d_jobs;
         CUDA_CHECK(cudaMalloc(&d_jobs, max_jobs * sizeof(SlabFillJob)));
 
         /*
-        * Process diagonals in increasing order of w+h. Every cut candidate for
-        * a cell (w, h) references strictly smaller perimeters, so by the time a
-        * diagonal is launched all data it depends on has been written and
-        * synchronized by the previous cudaDeviceSynchronize.
+        * Process diagonals in increasing order of w+h up to d_cutoff. Every cut
+        * candidate for a cell (w, h) references strictly smaller perimeters, so
+        * by the time a diagonal is launched all data it depends on has been
+        * written and synchronized by the previous cudaDeviceSynchronize.
         */
-        for (int d = 2; d <= sheet_width + sheet_height; d++) {
+        for (int d = 2; d <= d_cutoff; d++) {
             int num_jobs = 0;
 
             for (int w = 1; w <= sheet_width; w++) {
@@ -307,8 +327,8 @@ extern "C" {
             CUDA_CHECK(cudaDeviceSynchronize());
         }
 
-        CUDA_CHECK(cudaMemcpy(slab->data, d_data,
-                            slab->total_data_entries * sizeof(uint16_t),
+        /* Transfer only the portion filled by the GPU back to host. */
+        CUDA_CHECK(cudaMemcpy(slab->data, d_data, data_to_fill,
                             cudaMemcpyDeviceToHost));
         CUDA_CHECK(cudaMemcpy(&slab->overflow, d_overflow_flag,
                             sizeof(int), cudaMemcpyDeviceToHost));
@@ -323,6 +343,6 @@ extern "C" {
         CUDA_CHECK(cudaFree(d_jobs));
         free(host_jobs);
 
-        return 1;
+        return d_cutoff;
     }
-}
+} // extern "C"
