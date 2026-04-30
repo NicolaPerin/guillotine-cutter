@@ -350,7 +350,8 @@ void fill_defect_slab_cpu(DefectSlab *slab, int sheet_width, int sheet_height,
  *
  * Phase C  allocate flat data[] array (uint16 deltas)
  *
- * Phase D  fill via fill_defect_slab_gpu
+ * Phase D  fill via fill_defect_slab_gpu if CUDA is available,
+ *           otherwise via fill_defect_slab_cpu
  * ============================================================================= */
 DefectSlab *fill_defect_slab(int sheet_width, int sheet_height,
                               int32_t *defect_count_prefix, int32_t *pure_values,
@@ -427,7 +428,7 @@ DefectSlab *fill_defect_slab(int sheet_width, int sheet_height,
     }
     slab->data = (uint16_t *)malloc(data_count * sizeof(uint16_t));
 
-/* --- Phase D: fill --- */
+    /* --- Phase D: fill --- */
 #ifdef HAVE_CUDA
     if (!fill_defect_slab_gpu(slab, sheet_width, sheet_height, col_stride,
                                defect_count_prefix, pure_values)) {
