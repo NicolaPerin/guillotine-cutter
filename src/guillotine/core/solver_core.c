@@ -17,7 +17,7 @@
  * one defect need explicit storage.  All other positions equal
  * pure_values[w][h] and are recovered in O(1) without a data lookup.
  *
-* For each (w, h) pair the affected region is represented as a small set of
+ * For each (w, h) pair the affected region is represented as a small set of
  * disjoint rectangular tiles merged along the x-axis.  Tiles are x-sorted
  * and x-disjoint, which is required for the binary search in resolve_col
  * to be correct.  All tile data is packed into one flat uint16 array; each
@@ -350,7 +350,7 @@ void fill_defect_slab_cpu(DefectSlab *slab, int sheet_width, int sheet_height,
  *
  * Phase C  allocate flat data[] array (uint16 deltas)
  *
- * Phase D  fill via fill_defect_slab_cpu
+ * Phase D  fill via fill_defect_slab_gpu
  * ============================================================================= */
 DefectSlab *fill_defect_slab(int sheet_width, int sheet_height,
                               int32_t *defect_count_prefix, int32_t *pure_values,
@@ -427,9 +427,17 @@ DefectSlab *fill_defect_slab(int sheet_width, int sheet_height,
     }
     slab->data = (uint16_t *)malloc(data_count * sizeof(uint16_t));
 
-    /* --- Phase D: fill --- */
+/* --- Phase D: fill --- */
+#ifdef HAVE_CUDA
+    if (!fill_defect_slab_gpu(slab, sheet_width, sheet_height, col_stride,
+                               defect_count_prefix, pure_values)) {
+        fill_defect_slab_cpu(slab, sheet_width, sheet_height, col_stride,
+                             defect_count_prefix, pure_values);
+    }
+#else
     fill_defect_slab_cpu(slab, sheet_width, sheet_height, col_stride,
                          defect_count_prefix, pure_values);
+#endif
 
     if (slab->overflow)
         fprintf(stderr, "warning: defect slab delta overflow — one or more deltas "
