@@ -22,14 +22,23 @@ class GuillotineDP:
                             optimality without precomputed candidate sets.
     """
 
-    def __init__(self, item_sizes, geometry, patterns):
+    def __init__(self, item_sizes, geometry, patterns, allow_rotation=False):
         self.geom     = geometry
         self.patterns = patterns
         self.W0       = geometry.W0
         self.H0       = geometry.H0
 
-        self.item_w    = np.array(item_sizes[0], dtype=np.int32)
-        self.item_h    = np.array(item_sizes[1], dtype=np.int32)
+        item_w_orig = np.array(item_sizes[0], dtype=np.int32)
+        item_h_orig = np.array(item_sizes[1], dtype=np.int32)
+
+        if allow_rotation:
+            non_square = item_w_orig != item_h_orig
+            self.item_w = np.concatenate([item_w_orig, item_h_orig[non_square]])
+            self.item_h = np.concatenate([item_h_orig, item_w_orig[non_square]])
+        else:
+            self.item_w = item_w_orig
+            self.item_h = item_h_orig
+
         self.item_area = self.item_w * self.item_h
         self.n_items   = len(self.item_w)
 

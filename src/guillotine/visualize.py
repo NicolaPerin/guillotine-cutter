@@ -87,17 +87,17 @@ def _select_ticks(all_positions, sheet_dim, max_ticks=20):
 class CuttingVisualizer:
     """Visualizes cutting patterns."""
 
-    def __init__(self, item_sizes, defect_sizes, defect_positions, sheet_size):
+    def __init__(self, item_sizes, defect_sizes, defect_positions, sheet_size, n_items_orig=None):
         self.item_sizes = item_sizes
         self.defect_sizes = defect_sizes
         self.defect_positions = defect_positions
         self.sheet_size = sheet_size
+        self.n_items_orig = n_items_orig if n_items_orig is not None else len(item_sizes[0])
         self.xticks = []
         self.yticks = []
 
     def _get_colors(self):
-        """Return one vibrant color per item type, cycling if needed."""
-        n_items = len(self.item_sizes[0])
+        n_items = self.n_items_orig
         if n_items <= len(_VIBRANT_PALETTE):
             return _VIBRANT_PALETTE[:n_items]
         extra = [
@@ -142,9 +142,10 @@ class CuttingVisualizer:
         if isinstance(sequence, str):
             if sequence.startswith("g_"):
                 item_idx = int(sequence.split("_")[1])
+                color_idx = item_idx % self.n_items_orig
                 item_w = self.item_sizes[0][item_idx]
                 item_h = self.item_sizes[1][item_idx]
-                self._fill_items(ax, w, h, item_w, item_h, colors[item_idx], lw, offset)
+                self._fill_items(ax, w, h, item_w, item_h, colors[color_idx], lw, offset)
             return
 
         direction, z, left, right = sequence

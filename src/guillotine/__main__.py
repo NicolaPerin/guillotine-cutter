@@ -95,12 +95,10 @@ def estimate_memory(sheet_size, defect_sizes, defect_positions):
         try:
             from guillotine.core import _solver
             from guillotine.core.geometry import SheetGeometry
-            # build defects_arr the same way geometry does
             geom = SheetGeometry(sheet_size, defect_sizes, defect_positions)
             t1dx, d1dx, t1dy, d1dy, t2d, d2d = _solver.estimate_slab(
                 W0, H0, geom.defects_arr, n_defects)
 
-            # apply same selection logic as the C solver
             min_data = min(d1dx, d1dy, d2d)
             tolerance = 1.20
             candidates = [
@@ -124,7 +122,6 @@ def estimate_memory(sheet_size, defect_sizes, defect_positions):
             result["total"]           = f_tables + g_tables + prefix + best_data * 4
 
         except ImportError:
-            # fall back to dense estimate if C extension not available
             dense = (W0+1)**2 * (H0+1)**2 * 4
             result["slab_data"]   = dense
             result["slab_mb"]     = dense / 1024**2
@@ -212,6 +209,7 @@ def parse_args(argv=None):
             "  guillotine solve --sheet 27x27 --items 5x5 10x10 --defects 9,9,2x2\n"
             "  guillotine solve problem.json --dry-run\n"
             "  guillotine solve problem.json --plot\n"
+            "  guillotine solve problem.json --allow-rotation\n"
             "  guillotine plot output/solution.json\n"
             "Run 'guillotine <command> --help' for more information."
         ),
@@ -249,6 +247,12 @@ def parse_args(argv=None):
         "--dry-run",
         action="store_true",
         help="Print problem summary and memory estimates without solving"
+    )
+    bench_parser.add_argument(
+        "--allow-rotation",
+        action="store_true",
+        default=False,
+        help="Allow 90-degree rotation of items (adds rotated variants automatically)"
     )
 
     # ---- solve command ----
@@ -301,6 +305,12 @@ def parse_args(argv=None):
         action="store_true",
         help="Print problem summary and memory estimates without solving"
     )
+    solve_parser.add_argument(
+        "--allow-rotation",
+        action="store_true",
+        default=False,
+        help="Allow 90-degree rotation of items (adds rotated variants automatically)"
+    )
 
     # ---- plot command ----
     plot_parser = subparsers.add_parser(
@@ -335,7 +345,8 @@ def parse_args(argv=None):
 # Solver functions
 # -------------------------
 def run_solver(item_sizes, defect_sizes, defect_positions, sheet_size,
-               output_file, profile_file=None, plot_file=None):
+               output_file, profile_file=None, plot_file=None,
+               allow_rotation=False):
     """Run the solver, save results, and optionally plot.
 
     Plotting is done AFTER saving — the solution JSON is loaded back from
@@ -347,17 +358,19 @@ def run_solver(item_sizes, defect_sizes, defect_positions, sheet_size,
     def solve():
         geom = SheetGeometry(sheet_size, defect_sizes, defect_positions)
         patterns = CutPatternGenerator(item_sizes, geom)
-        dp = GuillotineDP(item_sizes, geom, patterns)
+        dp = GuillotineDP(item_sizes, geom, patterns, allow_rotation=allow_rotation)
         start = time.time()
         value, sequence = dp.solve()
         solve_time = time.time() - start
-        return value, sequence, solve_time
+        expanded_item_sizes = [dp.item_w.tolist(), dp.item_h.tolist()]
+        n_items_orig = len(item_sizes[0])
+        return value, sequence, solve_time, expanded_item_sizes, n_items_orig
 
     if profile_file:
         print(f"Profiling enabled, output: {profile_file}")
         profiler = cProfile.Profile()
         profiler.enable()
-        value, sequence, solve_time = solve()
+        value, sequence, solve_time, expanded_item_sizes, n_items_orig = solve()
         profiler.disable()
         profile_file = ensure_output_path(profile_file)
         with open(profile_file, 'w') as f:
@@ -366,25 +379,25 @@ def run_solver(item_sizes, defect_sizes, defect_positions, sheet_size,
             stats.print_stats(50)
         print(f"Profile saved to: {profile_file}")
     else:
-        value, sequence, solve_time = solve()
+        value, sequence, solve_time, expanded_item_sizes, n_items_orig = solve()
 
     output_file = ensure_output_path(output_file)
     save_solution_json(output_file, value, sequence,
-                       item_sizes, defect_sizes, defect_positions, sheet_size)
+                       expanded_item_sizes, defect_sizes, defect_positions,
+                       sheet_size, n_items_orig=n_items_orig)
 
     print(f"Solved in {solve_time:.3f}s")
     print(f"Value: {value}/{sheet_size[0]*sheet_size[1]} "
           f"({value/(sheet_size[0]*sheet_size[1])*100:.1f}%)")
     print(f"Output saved to: {output_file}")
 
-    # Plot from the saved JSON — solver memory is no longer referenced
-    # and can be collected before matplotlib loads.
     if plot_file:
         plot_file = ensure_output_path(plot_file)
         run_plot(output_file, plot_file)
 
 
-def run_benchmark(output_file, profile_file=None, plot_file=None):
+def run_benchmark(output_file, profile_file=None, plot_file=None,
+                  allow_rotation=False):
     """Run the paper benchmark case."""
     print("Running paper benchmark (27x27 sheet)...")
     item_sizes = [[5, 10, 12, 15], [5, 10, 12, 15]]
@@ -392,10 +405,12 @@ def run_benchmark(output_file, profile_file=None, plot_file=None):
     defect_positions = [[9], [9]]
     sheet_size = (27, 27)
     run_solver(item_sizes, defect_sizes, defect_positions, sheet_size,
-               output_file, profile_file, plot_file)
+               output_file, profile_file, plot_file,
+               allow_rotation=allow_rotation)
 
 
-def run_from_json(input_file, output_file, profile_file=None, plot_file=None):
+def run_from_json(input_file, output_file, profile_file=None, plot_file=None,
+                  allow_rotation=False):
     """Run solver from JSON input file."""
     print(f"Loading problem from {input_file}...")
     problem = load_problem_json(input_file)
@@ -406,7 +421,8 @@ def run_from_json(input_file, output_file, profile_file=None, plot_file=None):
         problem["sheet_size"],
         output_file,
         profile_file,
-        plot_file
+        plot_file,
+        allow_rotation=allow_rotation,
     )
 
 
@@ -429,7 +445,8 @@ def run_plot(solution_file, output_file):
         data["item_sizes"],
         data["defect_sizes"],
         data["defect_positions"],
-        data["sheet_size"]
+        data["sheet_size"],
+        n_items_orig=data.get("n_items_orig", len(data["item_sizes"][0])),
     )
 
     output_file = ensure_output_path(output_file)
@@ -449,11 +466,9 @@ def load_problem_for_dry_run(args):
             "sheet_size": (27, 27),
         }
 
-    # JSON input
     if args.input:
         return load_problem_json(args.input)
 
-    # Inline input
     if args.items and args.sheet:
         try:
             w, h = map(int, args.sheet.lower().split("x"))
@@ -515,13 +530,15 @@ def main(argv=None):
 
     # ---- benchmark ----
     if args.command == "benchmark":
-        run_benchmark(args.output, args.profile, args.plot)
+        run_benchmark(args.output, args.profile, args.plot,
+                      allow_rotation=args.allow_rotation)
         return 0
 
     # ---- solve ----
     elif args.command == "solve":
         if args.input:
-            run_from_json(args.input, args.output, args.profile, args.plot)
+            run_from_json(args.input, args.output, args.profile, args.plot,
+                          allow_rotation=args.allow_rotation)
             return 0
 
         if args.items and args.sheet:
@@ -560,7 +577,8 @@ def main(argv=None):
                 (w, h),
                 args.output,
                 args.profile,
-                args.plot
+                args.plot,
+                allow_rotation=args.allow_rotation,
             )
             return 0
 

@@ -104,8 +104,8 @@ def load_problem_json(filepath):
     }
 
 
-def save_solution_json(filepath, value, sequence,
-                       item_sizes, defect_sizes, defect_positions, sheet_size):
+def save_solution_json(filepath, value, sequence, item_sizes, defect_sizes, 
+                       defect_positions, sheet_size, n_items_orig=None):
     """Save solution to JSON file with all metrics and the full problem definition.
 
     The problem definition is embedded so that the solution file is
@@ -126,6 +126,7 @@ def save_solution_json(filepath, value, sequence,
 
     output = {
         "problem": _build_problem_dict(item_sizes, defect_sizes, defect_positions, sheet_size),
+        "n_items_orig": n_items_orig if n_items_orig is not None else len(item_sizes[0]),
         "solution": {
             "cut_area": value,
             "total_area": total_area,
@@ -204,6 +205,7 @@ def load_solution_json(filepath):
         "defect_sizes": defect_sizes,
         "defect_positions": defect_positions,
         "sheet_size": sheet_size,
+        "n_items_orig": data.get("n_items_orig", len(item_sizes[0])),
         "cut_area": sol["cut_area"],
         "total_area": sol["total_area"],
         "defect_area": sol["defect_area"],
