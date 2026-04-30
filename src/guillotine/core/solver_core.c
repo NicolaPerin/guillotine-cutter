@@ -141,6 +141,8 @@ void fill_tiling_table(int sheet_width, int sheet_height,
                        int32_t *item_widths, int32_t *item_heights,
                        int32_t *item_areas, int n_items) {
     int col_stride = sheet_height + 1;
+
+    #pragma omp parallel for schedule(dynamic)
     for (int rw = 1; rw <= sheet_width; rw++) {
         int base = rw * col_stride;
         for (int rh = 1; rh <= sheet_height; rh++) {
