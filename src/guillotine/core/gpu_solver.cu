@@ -211,8 +211,16 @@ extern "C" {
             abort();
         }
 
-        size_t free_mem, total_mem;
-        CUDA_CHECK(cudaMemGetInfo(&free_mem, &total_mem));
+        size_t free_mem = 0, total_mem = 0;
+        cudaError_t mem_err = cudaMemGetInfo(&free_mem, &total_mem);
+        /* If cudaMemGetInfo fails, we conservatively assume no GPU memory is available
+         * and fall back to CPU rather than risking an out-of-memory error. */
+        if (mem_err != cudaSuccess) {
+            fprintf(stderr, "warning: cudaMemGetInfo failed (%s) — falling back to CPU\n",
+                    cudaGetErrorString(mem_err));
+            return 0;
+        }
+
         size_t required = slab->total_data_entries * sizeof(uint16_t);
         size_t budget   = (size_t)((double)free_mem * 0.85);
 
