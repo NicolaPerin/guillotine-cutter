@@ -420,12 +420,17 @@ DefectSlab *fill_defect_slab(int sheet_width, int sheet_height,
     }
     slab->data = (uint16_t *)malloc(data_count * sizeof(uint16_t));
 
-    /* --- Phase D: fill --- */
+/* --- Phase D: fill --- */
+#ifdef HAVE_CUDA
     if (!fill_defect_slab_gpu(slab, sheet_width, sheet_height, col_stride,
-                            defect_count_prefix, pure_values)) {
+                               defect_count_prefix, pure_values)) {
         fill_defect_slab_cpu(slab, sheet_width, sheet_height, col_stride,
-                            defect_count_prefix, pure_values);
+                             defect_count_prefix, pure_values);
     }
+#else
+    fill_defect_slab_cpu(slab, sheet_width, sheet_height, col_stride,
+                         defect_count_prefix, pure_values);
+#endif
 
     if (slab->overflow)
         fprintf(stderr, "warning: defect slab delta overflow — one or more deltas "

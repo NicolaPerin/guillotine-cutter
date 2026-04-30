@@ -194,8 +194,9 @@ void fill_defect_slab_cpu(DefectSlab *slab, int sheet_width, int sheet_height,
                            int32_t *pure_values);
 
 /* GPU implementation of the defect slab fill (CUDA diagonal wavefront). */
+#ifdef HAVE_CUDA
 int fill_defect_slab_gpu(DefectSlab *slab, int sheet_width, int sheet_height,
                            int col_stride, const int32_t *defect_count_prefix,
                            const int32_t *pure_values);
-
+#endif
 #endif
