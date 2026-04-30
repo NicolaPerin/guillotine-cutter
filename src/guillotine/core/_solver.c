@@ -1,7 +1,8 @@
 /* =============================================================================
  * _solver.c — Python C extension bindings for the guillotine cutting solver
  *
- * This file is the ONLY file that depends on the Python C API. It provides wrappers that:
+ * This file is the ONLY file that depends on the Python C API. It provides
+ * wrappers that:
  *   1. Parse Python arguments (PyArg_ParseTuple)
  *   2. Acquire buffer views on numpy arrays (PyObject_GetBuffer)
  *   3. Call the core C functions declared in solver_core.h
@@ -11,10 +12,9 @@
  * All algorithmic logic lives in solver_core.c, which has no Python
  * dependency and can be compiled/tested independently.
  *
- * The FdSlab returned by fill_Fd_slab() is wrapped in a PyCapsule.
- * Python holds the capsule; when the capsule is garbage-collected,
- * the destructor frees all slab memory (data[], tiles[], tile_index[],
- * and each tile's local_defect_indices[]).
+ * The DefectSlab returned by fill_defect_slab() is wrapped in a PyCapsule.
+ * Python holds the capsule; when it is garbage-collected, the destructor
+ * frees all slab memory (data[], tiles[], tile_index[], has_tiles[]).
  * ============================================================================= */
 
 #define PY_SSIZE_T_CLEAN
@@ -24,19 +24,10 @@
 
 
 /* =============================================================================
- * PyCapsule destructor — frees the FdSlab when Python GC collects it
- *
- * Ownership model:
- *   - fill_Fd_slab() allocates: slab, slab->data, slab->tiles,
- *     slab->tile_index, and each tile's local_defect_indices[]
- *   - py_fill_Fd_slab() wraps the slab pointer in a PyCapsule
- *   - When the capsule is collected, this destructor frees everything
- *
- * free(NULL) is safe per the C standard, so no NULL checks needed for
- * individual tile->local_defect_indices entries.
+ * PyCapsule destructor — frees the DefectSlab when Python GC collects it
  * ============================================================================= */
-static void fd_slab_destructor(PyObject *capsule) {
-    FdSlab *slab = (FdSlab *)PyCapsule_GetPointer(capsule, "FdSlab");
+static void defect_slab_destructor(PyObject *capsule) {
+    DefectSlab *slab = (DefectSlab *)PyCapsule_GetPointer(capsule, "DefectSlab");
     if (!slab) return;
     free(slab->data);
     free(slab->tile_index);
@@ -47,42 +38,42 @@ static void fd_slab_destructor(PyObject *capsule) {
 
 
 /* =============================================================================
- * py_fill_g — Python wrapper for Phase 1 (g-table)
+ * py_fill_tiling — Python wrapper for Phase 1 (tiling table)
  *
  * Args from Python:
  *   (sheet_width, sheet_height,
- *    g_values,       — numpy int32 array, shape (W+1, H+1), output
- *    g_item_index,   — numpy int32 array, shape (W+1, H+1), output
- *    item_widths,    — numpy int32 array, shape (n_items,)
- *    item_heights,   — numpy int32 array, shape (n_items,)
- *    item_areas,     — numpy int32 array, shape (n_items,)
+ *    tiling_values,      — numpy int32 array, shape (W+1, H+1), output
+ *    tiling_item_index,  — numpy int32 array, shape (W+1, H+1), output
+ *    item_widths,        — numpy int32 array, shape (n_items,)
+ *    item_heights,       — numpy int32 array, shape (n_items,)
+ *    item_areas,         — numpy int32 array, shape (n_items,)
  *    n_items)
  *
- * Returns: None (modifies g_values and g_item_index in-place)
+ * Returns: None (modifies tiling_values and tiling_item_index in-place)
  * ============================================================================= */
-static PyObject *py_fill_g(PyObject *Py_UNUSED(self), PyObject *args) {
+static PyObject *py_fill_tiling(PyObject *Py_UNUSED(self), PyObject *args) {
     int sheet_width, sheet_height, n_items;
-    PyObject *o_gv, *o_gi, *o_iw, *o_ih, *o_ia;
+    PyObject *o_tv, *o_ti, *o_iw, *o_ih, *o_ia;
 
     if (!PyArg_ParseTuple(args, "iiOOOOOi",
             &sheet_width, &sheet_height,
-            &o_gv, &o_gi, &o_iw, &o_ih, &o_ia,
+            &o_tv, &o_ti, &o_iw, &o_ih, &o_ia,
             &n_items))
         return NULL;
 
-    Py_buffer b_gv, b_gi, b_iw, b_ih, b_ia;
-    PyObject_GetBuffer(o_gv, &b_gv, PyBUF_SIMPLE);
-    PyObject_GetBuffer(o_gi, &b_gi, PyBUF_SIMPLE);
+    Py_buffer b_tv, b_ti, b_iw, b_ih, b_ia;
+    PyObject_GetBuffer(o_tv, &b_tv, PyBUF_SIMPLE);
+    PyObject_GetBuffer(o_ti, &b_ti, PyBUF_SIMPLE);
     PyObject_GetBuffer(o_iw, &b_iw, PyBUF_SIMPLE);
     PyObject_GetBuffer(o_ih, &b_ih, PyBUF_SIMPLE);
     PyObject_GetBuffer(o_ia, &b_ia, PyBUF_SIMPLE);
 
-    fill_g_table(sheet_width, sheet_height,
-        (int32_t *)b_gv.buf, (int32_t *)b_gi.buf,
+    fill_tiling_table(sheet_width, sheet_height,
+        (int32_t *)b_tv.buf, (int32_t *)b_ti.buf,
         (int32_t *)b_iw.buf, (int32_t *)b_ih.buf, (int32_t *)b_ia.buf,
         n_items);
 
-    PyBuffer_Release(&b_gv); PyBuffer_Release(&b_gi);
+    PyBuffer_Release(&b_tv); PyBuffer_Release(&b_ti);
     PyBuffer_Release(&b_iw); PyBuffer_Release(&b_ih); PyBuffer_Release(&b_ia);
 
     Py_RETURN_NONE;
@@ -90,55 +81,56 @@ static PyObject *py_fill_g(PyObject *Py_UNUSED(self), PyObject *args) {
 
 
 /* =============================================================================
- * py_fill_F — Python wrapper for Phase 2 (F-table)
+ * py_fill_pure — Python wrapper for Phase 2 (pure table)
  *
  * Args from Python:
  *   (sheet_width, sheet_height,
- *    g_values,          — numpy int32 array, shape (W+1, H+1), input
- *    g_item_index,      — numpy int32 array, shape (W+1, H+1), input
- *    F_values,          — numpy int32 array, shape (W+1, H+1), output
- *    F_decision_type,   — numpy int8  array, shape (W+1, H+1), output
- *    F_decision_param,  — numpy int32 array, shape (W+1, H+1), output
- *    normal_cuts_x,     — numpy int32 array, shape (W+1, max_x_cuts), input
- *    n_normal_cuts_x,   — numpy int32 array, shape (W+1,), input
- *    normal_cuts_y,     — numpy int32 array, shape (H+1, max_y_cuts), input
- *    n_normal_cuts_y,   — numpy int32 array, shape (H+1,), input
+ *    tiling_values,       — numpy int32 array, shape (W+1, H+1), input
+ *    tiling_item_index,   — numpy int32 array, shape (W+1, H+1), input
+ *    pure_values,         — numpy int32 array, shape (W+1, H+1), output
+ *    pure_decision_type,  — numpy int8  array, shape (W+1, H+1), output
+ *    pure_decision_param, — numpy int32 array, shape (W+1, H+1), output
+ *    normal_cuts_x,       — numpy int32 array, shape (W+1, max_x_cuts), input
+ *    n_normal_cuts_x,     — numpy int32 array, shape (W+1,), input
+ *    normal_cuts_y,       — numpy int32 array, shape (H+1, max_y_cuts), input
+ *    n_normal_cuts_y,     — numpy int32 array, shape (H+1,), input
  *    max_x_cuts, max_y_cuts)
  *
- * Returns: None (modifies F_values, F_decision_type, F_decision_param in-place)
+ * Returns: None (modifies pure_values, pure_decision_type,
+ *                pure_decision_param in-place)
  * ============================================================================= */
-static PyObject *py_fill_F(PyObject *Py_UNUSED(self), PyObject *args) {
+static PyObject *py_fill_pure(PyObject *Py_UNUSED(self), PyObject *args) {
     int sheet_width, sheet_height, max_x_cuts, max_y_cuts;
-    PyObject *o_gv, *o_gi, *o_fv, *o_ft, *o_fp, *o_nx, *o_nlx, *o_ny, *o_nly;
+    PyObject *o_tv, *o_ti, *o_pv, *o_pt, *o_pp, *o_nx, *o_nlx, *o_ny, *o_nly;
 
     if (!PyArg_ParseTuple(args, "iiOOOOOOOOOii",
             &sheet_width, &sheet_height,
-            &o_gv, &o_gi,
-            &o_fv, &o_ft, &o_fp,
+            &o_tv, &o_ti,
+            &o_pv, &o_pt, &o_pp,
             &o_nx, &o_nlx,
             &o_ny, &o_nly,
             &max_x_cuts, &max_y_cuts))
         return NULL;
 
-    Py_buffer b_gv, b_gi, b_fv, b_ft, b_fp, b_nx, b_nlx, b_ny, b_nly;
-    PyObject_GetBuffer(o_gv,  &b_gv,  PyBUF_SIMPLE);
-    PyObject_GetBuffer(o_gi,  &b_gi,  PyBUF_SIMPLE);
-    PyObject_GetBuffer(o_fv,  &b_fv,  PyBUF_SIMPLE);
-    PyObject_GetBuffer(o_ft,  &b_ft,  PyBUF_SIMPLE);
-    PyObject_GetBuffer(o_fp,  &b_fp,  PyBUF_SIMPLE);
+    Py_buffer b_tv, b_ti, b_pv, b_pt, b_pp, b_nx, b_nlx, b_ny, b_nly;
+    PyObject_GetBuffer(o_tv,  &b_tv,  PyBUF_SIMPLE);
+    PyObject_GetBuffer(o_ti,  &b_ti,  PyBUF_SIMPLE);
+    PyObject_GetBuffer(o_pv,  &b_pv,  PyBUF_SIMPLE);
+    PyObject_GetBuffer(o_pt,  &b_pt,  PyBUF_SIMPLE);
+    PyObject_GetBuffer(o_pp,  &b_pp,  PyBUF_SIMPLE);
     PyObject_GetBuffer(o_nx,  &b_nx,  PyBUF_SIMPLE);
     PyObject_GetBuffer(o_nlx, &b_nlx, PyBUF_SIMPLE);
     PyObject_GetBuffer(o_ny,  &b_ny,  PyBUF_SIMPLE);
     PyObject_GetBuffer(o_nly, &b_nly, PyBUF_SIMPLE);
 
-    fill_F_table(sheet_width, sheet_height,
-        (int32_t *)b_gv.buf,  (int32_t *)b_gi.buf,
-        (int32_t *)b_fv.buf,  (int8_t  *)b_ft.buf, (int32_t *)b_fp.buf,
+    fill_pure_table(sheet_width, sheet_height,
+        (int32_t *)b_tv.buf,  (int32_t *)b_ti.buf,
+        (int32_t *)b_pv.buf,  (int8_t  *)b_pt.buf, (int32_t *)b_pp.buf,
         (int32_t *)b_nx.buf,  (int32_t *)b_nlx.buf, max_x_cuts,
         (int32_t *)b_ny.buf,  (int32_t *)b_nly.buf, max_y_cuts);
 
-    PyBuffer_Release(&b_gv);  PyBuffer_Release(&b_gi);
-    PyBuffer_Release(&b_fv);  PyBuffer_Release(&b_ft);  PyBuffer_Release(&b_fp);
+    PyBuffer_Release(&b_tv);  PyBuffer_Release(&b_ti);
+    PyBuffer_Release(&b_pv);  PyBuffer_Release(&b_pt);  PyBuffer_Release(&b_pp);
     PyBuffer_Release(&b_nx);  PyBuffer_Release(&b_nlx);
     PyBuffer_Release(&b_ny);  PyBuffer_Release(&b_nly);
 
@@ -147,96 +139,111 @@ static PyObject *py_fill_F(PyObject *Py_UNUSED(self), PyObject *args) {
 
 
 /* =============================================================================
- * py_fill_Fd_slab — Python wrapper for Phase 3 (Fd-table)
+ * py_fill_defect_slab — Python wrapper for Phase 3 (defect slab)
  *
  * Args from Python:
  *   (sheet_width, sheet_height,
  *    defect_count_prefix, — numpy int32 array, shape (W+1, H+1), input
- *    F_values,            — numpy int32 array, shape (W+1, H+1), input
+ *    pure_values,         — numpy int32 array, shape (W+1, H+1), input
  *    defect_array,        — numpy int32 array, shape (n_defects, 6), input
- *    n_defects)
+ *    n_defects,
+ *    min_w, min_h)        — minimum item dimensions; smaller rectangles skipped
  *
- * Returns: PyCapsule wrapping the FdSlab pointer.
+ * Returns: PyCapsule wrapping the DefectSlab pointer.
  *          The capsule destructor frees all slab memory when collected.
  * ============================================================================= */
-static PyObject *py_fill_Fd_slab(PyObject *Py_UNUSED(self), PyObject *args) {
-    int sw, sh, n, min_w, min_h; PyObject *op, *of, *od;
-    if (!PyArg_ParseTuple(args, "iiOOOiii", &sw, &sh, &op, &of, &od, &n, &min_w, &min_h)) return NULL;
-    Py_buffer bp, bf, bd;
-    PyObject_GetBuffer(op, &bp, PyBUF_SIMPLE);
-    PyObject_GetBuffer(of, &bf, PyBUF_SIMPLE);
-    PyObject_GetBuffer(od, &bd, PyBUF_SIMPLE);
-    FdSlab *slab = fill_Fd_slab(sw, sh, (int32_t*)bp.buf, (int32_t*)bf.buf, (int32_t*)bd.buf, n, min_w, min_h);
-    PyBuffer_Release(&bp); PyBuffer_Release(&bf); PyBuffer_Release(&bd);
-    return PyCapsule_New(slab, "FdSlab", fd_slab_destructor);
+static PyObject *py_fill_defect_slab(PyObject *Py_UNUSED(self), PyObject *args) {
+    int sw, sh, n, min_w, min_h;
+    PyObject *o_prefix, *o_pure, *o_defects;
+
+    if (!PyArg_ParseTuple(args, "iiOOOiii",
+            &sw, &sh, &o_prefix, &o_pure, &o_defects, &n, &min_w, &min_h))
+        return NULL;
+
+    Py_buffer b_prefix, b_pure, b_defects;
+    PyObject_GetBuffer(o_prefix,  &b_prefix,  PyBUF_SIMPLE);
+    PyObject_GetBuffer(o_pure,    &b_pure,    PyBUF_SIMPLE);
+    PyObject_GetBuffer(o_defects, &b_defects, PyBUF_SIMPLE);
+
+    DefectSlab *slab = fill_defect_slab(
+        sw, sh,
+        (int32_t *)b_prefix.buf,
+        (int32_t *)b_pure.buf,
+        (int32_t *)b_defects.buf,
+        n, min_w, min_h);
+
+    PyBuffer_Release(&b_prefix);
+    PyBuffer_Release(&b_pure);
+    PyBuffer_Release(&b_defects);
+
+    return PyCapsule_New(slab, "DefectSlab", defect_slab_destructor);
 }
 
 
 /* =============================================================================
- * py_fd_slab_lookup — single-point lookup, used during solution reconstruction
+ * py_defect_slab_lookup — single-point lookup for solution reconstruction
  *
- * During backtracking, the Python code needs to query Fd(w, h, x, y) to
- * determine which cut was optimal at each sub-rectangle. This function
- * provides that query via resolve_col()/colref_get() from solver_core.h.
+ * During backtracking, the Python code queries the optimal value for a
+ * specific defect-affected placement. Uses resolve_col()/colref_get()
+ * from solver_core.h.
  *
  * Args from Python:
- *   (capsule,        — PyCapsule wrapping the FdSlab
- *    F_values,       — numpy int32 array, shape (W+1, H+1), input
+ *   (capsule,        — PyCapsule wrapping the DefectSlab
+ *    pure_values,    — numpy int32 array, shape (W+1, H+1), input
  *    sheet_height,   — int (H0), needed to compute col_stride = H0+1
  *    rect_width, rect_height, sheet_x, sheet_y)
  *
- * Returns: int (the Fd value at that position)
+ * Returns: int (the defect-adjusted value at that placement)
  * ============================================================================= */
-static PyObject *py_fd_slab_lookup(PyObject *Py_UNUSED(self), PyObject *args) {
-    PyObject *capsule, *o_F;
+static PyObject *py_defect_slab_lookup(PyObject *Py_UNUSED(self), PyObject *args) {
+    PyObject *capsule, *o_pure;
     int sheet_height, rect_width, rect_height, sheet_x, sheet_y;
+
     if (!PyArg_ParseTuple(args, "OOiiiii",
-                          &capsule, &o_F, &sheet_height,
-                          &rect_width, &rect_height, &sheet_x, &sheet_y))
+            &capsule, &o_pure, &sheet_height,
+            &rect_width, &rect_height, &sheet_x, &sheet_y))
         return NULL;
 
-    FdSlab  *slab = (FdSlab *)PyCapsule_GetPointer(capsule, "FdSlab");
-    Py_buffer b_F;
-    PyObject_GetBuffer(o_F, &b_F, PyBUF_SIMPLE);
+    DefectSlab *slab = (DefectSlab *)PyCapsule_GetPointer(capsule, "DefectSlab");
+    if (!slab) {
+        PyErr_SetString(PyExc_RuntimeError, "Invalid DefectSlab capsule");
+        return NULL;
+    }
+
+    Py_buffer b_pure;
+    if (PyObject_GetBuffer(o_pure, &b_pure, PyBUF_SIMPLE) != 0)
+        return NULL;
 
     int col_stride = sheet_height + 1;
-    int32_t *F_values = (int32_t *)b_F.buf;
-
     ColRef cr;
-    resolve_col(&cr, slab, F_values, col_stride, rect_width, rect_height, sheet_x);
-    
+    resolve_col(&cr, slab, (int32_t *)b_pure.buf, col_stride,
+                rect_width, rect_height, sheet_x);
     int32_t value = colref_get(&cr, sheet_y);
 
-    PyBuffer_Release(&b_F);
+    PyBuffer_Release(&b_pure);
     return PyLong_FromLong(value);
 }
 
 
 /* =============================================================================
- * py_fd_slab_stats — diagnostics for memory usage analysis
+ * py_defect_slab_stats — diagnostics for memory usage analysis
  *
  * Returns a 4-tuple:
- *   (slab_entries,      — actual number of uint16_t values stored in the slab
- *    dense_equivalent,  — number of entries a full dense 4D array would need
- *    n_tiles,           — total number of tiles across all (w, h) pairs
- *    overflow)          — 1 if any delta exceeded UINT16_MAX during fill,
- *                         otherwise 0. Callers should raise on overflow.
- *
- * The ratio (slab_entries * 2) / (dense_equivalent * 4) shows the effective
- * memory savings from both sparse tiling and uint16 delta encoding.
+ *   (slab_entries,      — actual number of uint16 values stored
+ *    dense_equivalent,  — entries a full dense 4D table would need
+ *    n_tiles,           — total tiles across all (w, h) pairs
+ *    overflow)          — 1 if any delta exceeded uint16 range, else 0
  *
  * Args from Python:
- *   (capsule,)  — PyCapsule wrapping the FdSlab
+ *   (capsule,)  — PyCapsule wrapping the DefectSlab
  * ============================================================================= */
-static PyObject *py_fd_slab_stats(PyObject *Py_UNUSED(self), PyObject *args) {
+static PyObject *py_defect_slab_stats(PyObject *Py_UNUSED(self), PyObject *args) {
     PyObject *capsule;
     if (!PyArg_ParseTuple(args, "O", &capsule))
         return NULL;
 
-    FdSlab *slab = (FdSlab *)PyCapsule_GetPointer(capsule, "FdSlab");
+    DefectSlab *slab = (DefectSlab *)PyCapsule_GetPointer(capsule, "DefectSlab");
 
-    /* Dense equivalent: (W+1)^2 * (H+1)^2 entries.
-     * Uses int64_t to avoid overflow for large sheets. */
     int64_t dense = (int64_t)(slab->sheet_width  + 1) * (slab->sheet_width  + 1)
                   * (int64_t)(slab->sheet_height + 1) * (slab->sheet_height + 1);
 
@@ -248,63 +255,30 @@ static PyObject *py_fd_slab_stats(PyObject *Py_UNUSED(self), PyObject *args) {
 }
 
 
-static PyObject *py_estimate_slab(PyObject *Py_UNUSED(self), PyObject *args) {
-    int sheet_width, sheet_height, n_defects;
-    PyObject *o_defects;
-
-    if (!PyArg_ParseTuple(args, "iiOi",
-            &sheet_width, &sheet_height, &o_defects, &n_defects))
-        return NULL;
-
-    Py_buffer b_defects;
-    if (PyObject_GetBuffer(o_defects, &b_defects, PyBUF_SIMPLE) < 0)
-        return NULL;
-
-    SlabEstimate est = estimate_slab(
-        sheet_width, sheet_height,
-        (int32_t *)b_defects.buf, n_defects);
-
-    PyBuffer_Release(&b_defects);
-
-    return Py_BuildValue("(iLiLiL)",
-        est.tiles_1dx, (long long)est.data_1dx,
-        est.tiles_1dy, (long long)est.data_1dy,
-        est.tiles_2d,  (long long)est.data_2d);
-}
-
-
 /* =============================================================================
  * Module definition
  *
- * These five functions are the complete Python-visible API of the _solver
- * extension module. They map directly to the three DP phases plus the
- * two slab query functions:
- *
- *   fill_g         → Phase 1: g-table (single-item tiling)
- *   fill_F         → Phase 2: F-table (pure rectangle DP)
- *   fill_Fd_slab   → Phase 3: Fd-table (defected rectangle DP, returns capsule)
- *   fd_slab_lookup → Query Fd(w,h,x,y) from the slab (for reconstruction)
- *   fd_slab_stats  → Diagnostics (slab_entries, dense_equivalent, n_tiles)
+ *   fill_tiling        → Phase 1: tiling table (best single-item tiling)
+ *   fill_pure          → Phase 2: pure table (defect-free rectangle DP)
+ *   fill_defect_slab   → Phase 3: defect slab (returns PyCapsule)
+ *   defect_slab_lookup → Query defect-adjusted value at (w, h, x, y)
+ *   defect_slab_stats  → Memory diagnostics
  * ============================================================================= */
-
 static PyMethodDef SolverMethods[] = {
-    {"fill_g",         py_fill_g,          METH_VARARGS,
-     "Phase 1: precompute best single-item tiling (g table)."},
+    {"fill_tiling",        py_fill_tiling,        METH_VARARGS,
+     "Phase 1: precompute best single-item tiling values."},
 
-    {"fill_F",         py_fill_F,          METH_VARARGS,
-     "Phase 2: bottom-up DP for pure rectangles (F table)."},
+    {"fill_pure",          py_fill_pure,          METH_VARARGS,
+     "Phase 2: bottom-up DP for defect-free rectangles."},
 
-    {"fill_Fd_slab",   py_fill_Fd_slab,    METH_VARARGS,
-     "Phase 3: fill Fd values using multi-tile slab storage. Returns PyCapsule."},
+    {"fill_defect_slab",   py_fill_defect_slab,   METH_VARARGS,
+     "Phase 3: fill defect-adjusted values using sparse slab storage. Returns PyCapsule."},
 
-    {"fd_slab_lookup", py_fd_slab_lookup,  METH_VARARGS,
-     "Lookup a single Fd(w, h, x, y) value from the slab capsule."},
+    {"defect_slab_lookup", py_defect_slab_lookup, METH_VARARGS,
+     "Look up the defect-adjusted value at a specific placement."},
 
-    {"fd_slab_stats",  py_fd_slab_stats,   METH_VARARGS,
+    {"defect_slab_stats",  py_defect_slab_stats,  METH_VARARGS,
      "Return (slab_entries, dense_equivalent, n_tiles, overflow) for memory diagnostics."},
-
-    {"estimate_slab", py_estimate_slab, METH_VARARGS,
-     "Estimate slab size for all three merge strategies. Returns (tiles_1dx, data_1dx, tiles_1dy, data_1dy, tiles_2d, data_2d)."},
 
     {NULL, NULL, 0, NULL}
 };
@@ -321,7 +295,6 @@ static struct PyModuleDef solvermodule = {
     NULL                                            /* m_free     */
 };
 
-/* Module initialization — called by Python on `import guillotine.core._solver`. */
 PyMODINIT_FUNC PyInit__solver(void) {
     return PyModule_Create(&solvermodule);
 }
