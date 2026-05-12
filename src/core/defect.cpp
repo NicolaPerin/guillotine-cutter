@@ -4,7 +4,7 @@
 namespace gdcut {
 
     DefectMap::DefectMap(int sheet_width, int sheet_height, const std::vector<Defect>& defects) 
-        : sheet_width_(sheet_width), sheet_height_(sheet_height) {
+        : sheet_width_(sheet_width), sheet_height_(sheet_height), defects_(defects) {
         
         /* Step 1: Build a flat grid marking each cell as defective (1) or clean (0).
         // Layout is column-major: index = cell_x * sheet_height_ + cell_y,

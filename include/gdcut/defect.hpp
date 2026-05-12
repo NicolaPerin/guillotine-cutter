@@ -97,11 +97,14 @@ namespace gdcut {
          */
         int cumul_defective_cells_table_stride() const;
 
+        /** @brief List of defects on the sheet. */
+        const std::vector<Defect>& defects() const;
+
     private:
         int sheet_width_, sheet_height_;
 
-        /** @brief Flat column-major 2D prefix sum, size (sheet_width_+1)*(sheet_height_+1). */
-        std::vector<int32_t> cumul_defective_cells_table_;
+        std::vector<Defect>  defects_;                    // kept for ExtendedCuts queries
+        std::vector<int32_t> cumul_defective_cells_table_; // precomputed prefix sum
     };
 
 } // namespace gdcut
