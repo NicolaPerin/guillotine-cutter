@@ -54,11 +54,17 @@ namespace gdcut {
              */
             const std::vector<int>& raster_points(int dim) const;
 
+            /** 
+             * @brief Returns a vector of all normal cut positions.
+             */
+            const std::vector<int>& all_normal_positions() const;
+
         private:
             int max_dim_;
             std::vector<bool> is_reachable_;
             std::vector<int> max_reachable_;
             std::vector<std::vector<int>> normal_cuts_;
             std::vector<std::vector<int>> raster_points_;
+            std::vector<int> all_normal_positions_;
     };
 }

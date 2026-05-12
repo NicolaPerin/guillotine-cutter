@@ -13,6 +13,11 @@ namespace gdcut {
                 if (is_reachable_[position - item_size])
                     is_reachable_[position] = true;
 
+        // Collect all normal cut positions for quick access
+        for (int z = 0; z <= max_dim_; ++z)
+            if (is_reachable_[z])
+                all_normal_positions_.push_back(z);
+
         // Step 2: Precompute the maximum reachable dimension for each dimension up to max_dim.
         max_reachable_.resize(max_dim + 1);
         max_reachable_[0] = 0; // base case: max reachable dimension for 0 is 0
@@ -58,13 +63,9 @@ namespace gdcut {
         }
     }
 
-    int PurePatterns::max_dim() const { return max_dim_; }
-
-    bool PurePatterns::is_reachable(int dim) const { return is_reachable_[dim]; }
-
-    int PurePatterns::max_reachable(int dim) const { return max_reachable_[dim]; }
-
-    const std::vector<int>& PurePatterns::normal_cuts(int dim) const { return normal_cuts_[dim]; }
-
-    const std::vector<int>& PurePatterns::raster_points(int dim) const { return raster_points_[dim]; }
+    int                     PurePatterns::max_dim()                 const { return max_dim_; }
+    bool                    PurePatterns::is_reachable(int dim)     const { return is_reachable_[dim]; }
+    int                     PurePatterns::max_reachable(int dim)    const { return max_reachable_[dim]; }
+    const std::vector<int>& PurePatterns::normal_cuts(int dim)      const { return normal_cuts_[dim]; }
+    const std::vector<int>& PurePatterns::raster_points(int dim)    const { return raster_points_[dim]; }
 }
