@@ -27,4 +27,7 @@ add_library(gdcut_core
     src/core/defect_table.cpp
 )
 
+add_executable(gdcut src/main.cpp)
+target_link_libraries(gdcut PRIVATE gdcut_core)
+
 add_subdirectory(tests)
