@@ -29,7 +29,7 @@ namespace gdcut {
         // The table is computed once during construction so that later rectangle
         // queries cost in O(1) time (four lookups and three additions) instead of O(w * h)
 
-        cumul_defective_cells_table_.resize((sheet_width_ + 1) * (sheet_height_ + 1)); // the +1 is for the extra row and column of zeros at the beginning
+        cumul_defective_cells_table_.resize((sheet_width_ + 1) * (sheet_height_ + 1)); // the + 1 is for the extra row and column of zeros at the beginning
         for (int x = 1; x <= sheet_width_; ++x)
             for (int y = 1; y <= sheet_height_; ++y)
                 cumul_defective_cells_table_[x * (sheet_height_ + 1) + y] = defective_cells[(x - 1) * sheet_height_ + (y - 1)] 
