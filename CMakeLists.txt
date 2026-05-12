@@ -19,6 +19,7 @@ add_library(gdcut_core
     src/core/defect.cpp
     src/core/patterns.cpp
     src/core/pure_table.cpp
+    src/core/problem.cpp
 )
 
 add_subdirectory(tests)

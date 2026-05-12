@@ -16,7 +16,14 @@ add_executable(test_pure_table
 )
 target_link_libraries(test_pure_table PRIVATE gdcut_core)
 
+add_executable(test_problem
+    catch_main.cpp
+    test_problem.cpp
+)
+target_link_libraries(test_problem PRIVATE gdcut_core)
+
 enable_testing()
 add_test(NAME test_defect COMMAND test_defect)
 add_test(NAME test_patterns COMMAND test_patterns)
 add_test(NAME test_pure_table COMMAND test_pure_table)
+add_test(NAME test_problem COMMAND test_problem)
