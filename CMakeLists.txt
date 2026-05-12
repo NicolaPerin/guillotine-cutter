@@ -18,6 +18,7 @@ include_directories(vendor)
 add_library(gdcut_core
     src/core/defect.cpp
     src/core/patterns.cpp
+    src/core/pure_table.cpp
 )
 
 add_subdirectory(tests)
