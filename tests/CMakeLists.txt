@@ -34,6 +34,12 @@ add_executable(test_solver
 )
 target_link_libraries(test_solver PRIVATE gdcut_core)
 
+add_executable(test_defect_table
+    catch_main.cpp
+    test_defect_table.cpp
+)
+target_link_libraries(test_defect_table PRIVATE gdcut_core)
+
 add_executable(test_all
     catch_main.cpp
     test_defect.cpp
@@ -42,6 +48,7 @@ add_executable(test_all
     test_problem.cpp
     test_cut_candidates.cpp
     test_solver.cpp
+    test_defect_table.cpp
 )
 target_link_libraries(test_all PRIVATE gdcut_core)
 
@@ -52,4 +59,5 @@ add_test(NAME test_pure_table COMMAND test_pure_table)
 add_test(NAME test_problem COMMAND test_problem)
 add_test(NAME test_cut_candidates COMMAND test_cut_candidates)
 add_test(NAME test_solver COMMAND test_solver)
+add_test(NAME test_defect_table COMMAND test_defect_table)
 add_test(NAME test_all COMMAND test_all)
