@@ -79,16 +79,16 @@ int main(int argc, char* argv[]) {
     CLI11_PARSE(app, argc, argv);
     
     try {
+        auto t0 = std::chrono::high_resolution_clock::now();
+
         Problem problem = Problem::from_json(input_path);
         Solver solver(problem);
-        
-        auto t0 = std::chrono::high_resolution_clock::now();
         int32_t value = solver.solve();
-        auto t1 = std::chrono::high_resolution_clock::now();
-        double elapsed = std::chrono::duration<double>(t1 - t0).count();
-        
         CutSequence sequence = solver.reconstruct();
         write_solution(output_path, problem, value, sequence);
+
+        auto t1 = std::chrono::high_resolution_clock::now();
+        double elapsed = std::chrono::duration<double>(t1 - t0).count();
         
         std::cout << "Solved in " << std::fixed << std::setprecision(3)
                 << elapsed << "s\n"
