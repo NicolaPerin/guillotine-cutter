@@ -17,4 +17,8 @@ namespace gdcut {
     CutSequence CutNode::make_cut_y(int32_t position, CutSequence left, CutSequence right) {
         return std::make_unique<CutNode>(Decision::CutY, position, std::move(left), std::move(right));
     }
+
+    CutSequence CutNode::make_defect() {
+        return std::make_unique<CutNode>(Decision::Defect, 0, nullptr, nullptr);
+    }
 }

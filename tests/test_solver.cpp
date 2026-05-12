@@ -63,10 +63,16 @@ TEST_CASE("Solver: reconstruct throws before solve", "[Solver]") {
     REQUIRE_THROWS_AS(s.reconstruct(), std::runtime_error);
 }
 
-TEST_CASE("Solver: defect sheet throws", "[Solver]") {
-    Problem p(5, 5, {2}, {2}, {4}, {{1, 1, 1, 1}});
+TEST_CASE("Solver: defect sheet gives correct value", "[Solver]") {
+    // paper Example 1: 27x27 sheet, items {5,10,12,15}, defect at (9,9,2,2)
+    // expected value: 644
+    Problem p(27, 27,
+              {5, 10, 12, 15},
+              {5, 10, 12, 15},
+              {25, 100, 144, 225},
+              {{9, 9, 2, 2}});
     Solver s(p);
-    REQUIRE_THROWS_AS(s.solve(), std::runtime_error);
+    REQUIRE(s.solve() == 644);
 }
 
 // Tiling correctness

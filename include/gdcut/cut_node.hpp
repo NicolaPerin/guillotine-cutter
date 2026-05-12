@@ -31,5 +31,8 @@ namespace gdcut {
 
         /** @brief Creates a vertical cut node in the cut sequence. */
         static CutSequence make_cut_y(int32_t position, CutSequence left, CutSequence right);
+
+        /** @brief Creates a defect node in the cut sequence. */
+        static CutSequence make_defect();
     };
 }
