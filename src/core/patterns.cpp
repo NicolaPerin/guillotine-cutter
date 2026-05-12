@@ -58,7 +58,7 @@ namespace gdcut {
 
             // skip zero — means no item fits on that side
             for (auto value : result_set)
-                if (value > 0)
+                if (value > 0 && value < dimension) // only valid cut points strictly between 0 and dimension
                     raster_points_[dimension].push_back(value);
         }
     }
@@ -68,4 +68,5 @@ namespace gdcut {
     int                     PurePatterns::max_reachable(int dim)    const { return max_reachable_[dim]; }
     const std::vector<int>& PurePatterns::normal_cuts(int dim)      const { return normal_cuts_[dim]; }
     const std::vector<int>& PurePatterns::raster_points(int dim)    const { return raster_points_[dim]; }
+    const std::vector<int>& PurePatterns::all_normal_positions()    const { return all_normal_positions_; }
 }

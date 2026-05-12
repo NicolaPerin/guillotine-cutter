@@ -44,6 +44,8 @@ namespace gdcut {
 
     int DefectMap::cumul_defective_cells_table_stride() const { return sheet_height_ + 1; }
 
+    const std::vector<Defect>& DefectMap::defects() const { return defects_; }
+
     const int32_t* DefectMap::cumul_defective_cells_table() const { return cumul_defective_cells_table_.data(); }
 
     // Count defective cells in the rectangle [x_start, x_end) x [y_start, y_end)

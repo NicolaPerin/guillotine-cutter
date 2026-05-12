@@ -22,8 +22,26 @@ add_executable(test_problem
 )
 target_link_libraries(test_problem PRIVATE gdcut_core)
 
+add_executable(test_cut_candidates
+    catch_main.cpp
+    test_cut_candidates.cpp
+)
+target_link_libraries(test_cut_candidates PRIVATE gdcut_core)
+
+add_executable(test_all
+    catch_main.cpp
+    test_defect.cpp
+    test_patterns.cpp
+    test_pure_table.cpp
+    test_problem.cpp
+    test_cut_candidates.cpp
+)
+target_link_libraries(test_all PRIVATE gdcut_core)
+
 enable_testing()
 add_test(NAME test_defect COMMAND test_defect)
 add_test(NAME test_patterns COMMAND test_patterns)
 add_test(NAME test_pure_table COMMAND test_pure_table)
 add_test(NAME test_problem COMMAND test_problem)
+add_test(NAME test_cut_candidates COMMAND test_cut_candidates)
+add_test(NAME test_all COMMAND test_all)

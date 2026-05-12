@@ -20,6 +20,7 @@ add_library(gdcut_core
     src/core/patterns.cpp
     src/core/pure_table.cpp
     src/core/problem.cpp
+    src/core/cut_candidates.cpp
 )
 
 add_subdirectory(tests)
