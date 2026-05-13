@@ -40,13 +40,13 @@ public:
     static Problem from_json(const std::string& path);
 
     /** @brief Width of the sheet */
-    int sheet_width()  const;
+    inline int sheet_width()  const { return sheet_width_; }
 
     /** @brief Height of the sheet */
-    int sheet_height() const;
+    inline int sheet_height() const { return sheet_height_; }
 
     /** @brief Number of item types */
-    int n_items() const;
+    inline int n_items()      const { return item_widths_.size(); }
 
     /** @brief True if the sheet has at least one defect */
     bool has_defects() const;

@@ -13,7 +13,7 @@ endif()
 
 add_compile_options(-Wall -Wextra -Wpedantic)
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    add_compile_options(-O2 -march=native)
+    add_compile_options(-O3 -march=native)
 elseif(CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_options(-O0 -g)
 endif()

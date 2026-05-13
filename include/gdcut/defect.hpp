@@ -48,12 +48,20 @@ namespace gdcut {
         /**
          * @brief Counts defective cells in the rectangle [x_start, x_end) x [y_start, y_end).
          *
-         * Uses the inclusion-exclusion formula on the cumulative table:
+         * Uses the inclusion-exclusion formula on the cumulative table.
+         * The rectangle always sits at the bottom-right of the four prefix sum lookups:
+         *
+         *   (0,0)
+         *        +--------------------+
+         *        | top_left  top_right|
+         *        |                    |
+         *        | bottom_left  [????]| ← region we want
+         *        +--------------------+ (x_end, y_end)
+         *
          *   result = bottom_right - top_right - bottom_left + top_left
          *
-         * where each term is a single lookup into cumul_defective_cells_table_.
-         * top_right and bottom_left overlap in the top_left region, so top_left
-         * is added back once to correct the double subtraction.
+         * top_right and bottom_left overlap in the top_left region — adding
+         * top_left back once corrects the double subtraction.
          *
          * @param x_start  inclusive left edge
          * @param y_start  inclusive top edge
@@ -61,8 +69,16 @@ namespace gdcut {
          * @param y_end    exclusive bottom edge
          * @return number of defective cells in the rectangle
          */
-        int count_defective_cells_in_rectangle(int x_start, int y_start,
-                                            int x_end,   int y_end) const;
+        inline int count_defective_cells_in_rectangle(
+            int x_start, int y_start, int x_end, int y_end) const {
+
+            const int stride       = cumul_defective_cells_table_stride();
+            const int top_left     = cumul_defective_cells_table_[x_start * stride + y_start];
+            const int top_right    = cumul_defective_cells_table_[x_end   * stride + y_start];
+            const int bottom_left  = cumul_defective_cells_table_[x_start * stride + y_end];
+            const int bottom_right = cumul_defective_cells_table_[x_end   * stride + y_end];
+            return bottom_right - top_right - bottom_left + top_left;
+        }
 
         /**
          * @brief Returns true if no defective cells overlap the rectangle.
@@ -73,13 +89,15 @@ namespace gdcut {
          * @param h  height of the rectangle
          * @return true if the rectangle contains no defective cells
          */
-        bool is_defect_free_rectangle(int x, int y, int w, int h) const;
+        inline bool is_defect_free_rectangle(int x, int y, int w, int h) const {
+            return count_defective_cells_in_rectangle(x, y, x + w, y + h) == 0;
+        }
 
         /** @brief Width of the sheet in cells. */
-        int sheet_width() const;
+        inline int sheet_width() const { return sheet_width_; };
 
         /** @brief Height of the sheet in cells. */
-        int sheet_height() const;
+        inline int sheet_height() const { return sheet_height_; };
 
         /**
          * @brief Raw pointer to the cumulative defective cell count table.
@@ -87,7 +105,7 @@ namespace gdcut {
          * Exposed for use by the CPU and GPU fill routines in DefectSlab.
          * Layout is column-major with stride = sheet_height_ + 1.
          */
-        const int32_t* cumul_defective_cells_table() const;
+        inline const int32_t* cumul_defective_cells_table() const { return cumul_defective_cells_table_.data(); }
 
         /**
          * @brief Stride of the cumulative defective cell count table.
@@ -95,10 +113,10 @@ namespace gdcut {
          * Equal to sheet_height_ + 1. Used to index into the flat array
          * as table[x * stride + y].
          */
-        int cumul_defective_cells_table_stride() const;
+        inline int cumul_defective_cells_table_stride() const { return sheet_height_ + 1; }
 
         /** @brief List of defects on the sheet. */
-        const std::vector<Defect>& defects() const;
+        inline const std::vector<Defect>& defects() const { return defects_; }
 
     private:
         int sheet_width_, sheet_height_;

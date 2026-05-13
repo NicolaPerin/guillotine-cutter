@@ -106,13 +106,9 @@ PureTable::PureTable(int sheet_width, int sheet_height,
     }
 }
 
-int            PureTable::sheet_width()  const { return sheet_width_; }
-int            PureTable::sheet_height() const { return sheet_height_; }
-int32_t        PureTable::value(int w, int h)        const { return values_   [w * (sheet_height_ + 1) + h]; }
-Decision       PureTable::decision(int w, int h)     const { return decisions_ [w * (sheet_height_ + 1) + h]; }
-int32_t        PureTable::cut_position(int w, int h) const { return cut_positions_[w * (sheet_height_ + 1) + h]; }
-int32_t        PureTable::best_item(int w, int h)    const { return best_items_[w * (sheet_height_ + 1) + h]; }
-const int32_t* PureTable::values_data()              const { return values_.data(); }
-int            PureTable::values_stride()            const { return sheet_height_ + 1; }
+int            PureTable::sheet_width()   const { return sheet_width_; }
+int            PureTable::sheet_height()  const { return sheet_height_; }
+const int32_t* PureTable::values_data()   const { return values_.data(); }
+int            PureTable::values_stride() const { return sheet_height_ + 1; }
 
 } // namespace gdcut

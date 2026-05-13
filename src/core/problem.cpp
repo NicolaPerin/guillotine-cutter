@@ -59,9 +59,6 @@ Problem Problem::from_json(const std::string& path) {
                    std::move(defects));
 }
 
-int  Problem::sheet_width()  const { return sheet_width_;  }
-int  Problem::sheet_height() const { return sheet_height_; }
-int  Problem::n_items()      const { return static_cast<int>(item_widths_.size()); }
 bool Problem::has_defects()  const { return !defects_.empty(); }
 
 const std::vector<int>&    Problem::item_widths()  const { return item_widths_;  }

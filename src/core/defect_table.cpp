@@ -277,32 +277,6 @@ int32_t DefectTable::lookup(int w, int h, int sx, int sy) const {
 
 int32_t DefectTable::value(int w, int h, int sx, int sy) const { return lookup(w, h, sx, sy); }
 
-DefectTable::ColumnView DefectTable::resolve_column(int w, int h, int sx) const {
-    const int    stride   = sheet_height_ + 1;
-    const int    wh_idx   = w * stride + h;
-    const int32_t pure_val = pure_table_.value(w, h);
-
-    if (!has_affected_[wh_idx])
-        return {pure_val, true, 0, 0, nullptr};
-
-    const AffectedRegionIndex& idx = region_index_[wh_idx];
-
-    // binary search
-    int lo = 0, hi = idx.region_count - 1;
-    while (lo <= hi) {
-        int mid = lo + (hi - lo) / 2;
-        const AffectedRegion& r = regions_[idx.regions_offset + mid];
-        if      (sx < r.sheet_x_start)                hi = mid - 1;
-        else if (sx > r.sheet_x_start + r.width - 1)  lo = mid + 1;
-        else {
-            int lx = sx - r.sheet_x_start;
-            return {pure_val, false, r.height, r.sheet_y_start,
-                    &deltas_[r.delta_offset + lx * r.height]};
-        }
-    }
-    return {pure_val, true, 0, 0, nullptr};
-}
-
 int32_t DefectTable::column_get(const ColumnView& cv, int sy) const {
     if (cv.is_pure) return cv.pure_val;
     int ly = sy - cv.sheet_y_start;
@@ -313,122 +287,185 @@ int32_t DefectTable::column_get(const ColumnView& cv, int sy) const {
 // For each position in each AffectedRegion, computes the optimal value by
 // trying all guillotine cuts and stores delta = pure_value - best_value.
 //
-// Pure positions (no defective cells in rectangle) get delta=0 and are
-// skipped. Impure positions try all vertical cuts z in [1,w) and horizontal
-// cuts z in [1,h), taking the best combined value from lookup() on both halves.
-// lookup() recursively uses already-filled deltas for smaller sub-problems,
-// which is why diagonal offset assignment is required.
+// Pure-position elimination: Pass 1 seeds col_best[ly] = pure_val for pure
+// positions and 0 for impure ones. Because any guillotine cut of a defect-free
+// rectangle satisfies v_left + v_right <= pure_val, the max-update in
+// Passes 2/3 never modifies pure slots. Pass 4 writes delta = pure_val -
+// col_best[ly] uniformly: 0 for pure positions, the correct delta otherwise.
 //
-// Deltas exceeding uint16 range are clamped to UINT16_MAX and overflow_ is set.
+// Four-way dispatch: the (left.is_pure, right.is_pure) test is hoisted out
+// of the ly loop. The pure×pure case becomes a constant max-update over ly;
+// the half-pure cases split the ly range into three contiguous segments so
+// the data-bearing segment is straight-line; only impure×impure retains
+// per-ly bounds checks, and those are on loop-invariant locals.
 void DefectTable::fill_deltas(const DefectMap& defect_map,
                                int stride,
                                int min_item_width,
                                int min_item_height) {
-    // Allocated ONCE to maximum possible size.
-    // Capacity covers any y_span up to the full sheet height.
     std::vector<int32_t> col_best(sheet_height_ + 1);
-    std::vector<uint8_t> is_impure(sheet_height_ + 1);
+
+    const int32_t* const prefix_base = defect_map.cumul_defective_cells_table();
+    const int p_stride = defect_map.cumul_defective_cells_table_stride();
 
     for (int w = min_item_width; w <= sheet_width_; ++w) {
         for (int h = min_item_height; h <= sheet_height_; ++h) {
-            int wh_idx = w * stride + h;
+            const int wh_idx = w * stride + h;
             if (!has_affected_[wh_idx]) continue;
 
-            const int32_t              pure_val = pure_table_.value(w, h);
-            const AffectedRegionIndex& idx      = region_index_[wh_idx];
+            const int32_t pure_val = pure_table_.value(w, h);
+            const AffectedRegionIndex& idx = region_index_[wh_idx];
 
             for (int r = 0; r < idx.region_count; ++r) {
                 const AffectedRegion& region = regions_[idx.regions_offset + r];
                 const int y_span = region.height;
 
-                // Dynamic resize removed here. Vectors already possess sufficient capacity.
-
                 for (int lx = 0; lx < region.width; ++lx) {
                     const int sx = region.sheet_x_start + lx;
 
-                    // Pass 1: classify each sy as pure or impure
+                    // --- PASS 1: Defect classification + col_best seeding ---
+                    const int32_t* const col_right = prefix_base + (sx + w) * p_stride;
+                    const int32_t* const col_left  = prefix_base + sx       * p_stride;
+
                     int impure_count = 0;
                     for (int ly = 0; ly < y_span; ++ly) {
                         const int sy = region.sheet_y_start + ly;
-                        if (defect_map.count_defective_cells_in_rectangle(
-                                sx, sy, sx + w, sy + h) == 0) {
-                            deltas_[region.delta_offset + lx * y_span + ly] = 0;
-                            is_impure[ly] = 0;
+                        const int defects = col_right[sy + h] - col_left[sy + h]
+                                          - col_right[sy]     + col_left[sy];
+                        if (defects == 0) {
+                            col_best[ly] = pure_val;
                         } else {
-                            is_impure[ly] = 1;
-                            col_best[ly]  = 0;
+                            col_best[ly] = 0;
                             ++impure_count;
                         }
                     }
 
                     if (impure_count == 0) continue;
 
-                    // Pass 2: vertical cuts — resolve column ONCE per z
+                    // --- PASS 2: Vertical cuts (dispatched on is_pure) ---
                     for (int z = 1; z < w; ++z) {
-                        ColumnView left  = resolve_column(z,     h, sx);
-                        ColumnView right = resolve_column(w - z, h, sx + z);
-                        
-                        const int l_offset = region.sheet_y_start - left.sheet_y_start;
-                        const int r_offset = region.sheet_y_start - right.sheet_y_start;
+                        const ColumnView left  = resolve_column(z,     h, sx);
+                        const ColumnView right = resolve_column(w - z, h, sx + z);
+                        const int32_t base = left.pure_val + right.pure_val;
 
-                        for (int ly = 0; ly < y_span; ++ly) {
-                            if (!is_impure[ly]) continue;
-                            
-                            int32_t v_left = left.pure_val;
-                            if (!left.is_pure) {
-                                int t_ly = ly + l_offset;
-                                if (t_ly >= 0 && t_ly < left.y_span) v_left -= left.col_data[t_ly];
+                        if (left.is_pure && right.is_pure) {
+                            // Constant v across ly — pure max-update.
+                            for (int ly = 0; ly < y_span; ++ly)
+                                if (base > col_best[ly]) col_best[ly] = base;
+
+                        } else if (right.is_pure) {
+                            // Only `left` carries deltas.
+                            const int l_off = region.sheet_y_start - left.sheet_y_start;
+                            const int ly_lo = std::max(0,      -l_off);
+                            const int ly_hi = std::min(y_span, left.y_span - l_off);
+
+                            for (int ly = 0; ly < ly_lo; ++ly)
+                                if (base > col_best[ly]) col_best[ly] = base;
+                            for (int ly = ly_lo; ly < ly_hi; ++ly) {
+                                const int32_t v = base - left.col_data[ly + l_off];
+                                if (v > col_best[ly]) col_best[ly] = v;
                             }
+                            for (int ly = ly_hi; ly < y_span; ++ly)
+                                if (base > col_best[ly]) col_best[ly] = base;
 
-                            int32_t v_right = right.pure_val;
-                            if (!right.is_pure) {
-                                int t_ly = ly + r_offset;
-                                if (t_ly >= 0 && t_ly < right.y_span) v_right -= right.col_data[t_ly];
+                        } else if (left.is_pure) {
+                            // Only `right` carries deltas.
+                            const int r_off = region.sheet_y_start - right.sheet_y_start;
+                            const int ly_lo = std::max(0,      -r_off);
+                            const int ly_hi = std::min(y_span, right.y_span - r_off);
+
+                            for (int ly = 0; ly < ly_lo; ++ly)
+                                if (base > col_best[ly]) col_best[ly] = base;
+                            for (int ly = ly_lo; ly < ly_hi; ++ly) {
+                                const int32_t v = base - right.col_data[ly + r_off];
+                                if (v > col_best[ly]) col_best[ly] = v;
                             }
+                            for (int ly = ly_hi; ly < y_span; ++ly)
+                                if (base > col_best[ly]) col_best[ly] = base;
 
-                            const int32_t v = v_left + v_right;
-                            if (v > col_best[ly]) col_best[ly] = v;
+                        } else {
+                            // Both columns carry deltas — rare. Hoisted bounds.
+                            const int l_off = region.sheet_y_start - left.sheet_y_start;
+                            const int r_off = region.sheet_y_start - right.sheet_y_start;
+                            const int l_ly_lo = std::max(0,      -l_off);
+                            const int l_ly_hi = std::min(y_span, left.y_span  - l_off);
+                            const int r_ly_lo = std::max(0,      -r_off);
+                            const int r_ly_hi = std::min(y_span, right.y_span - r_off);
+
+                            for (int ly = 0; ly < y_span; ++ly) {
+                                int32_t v = base;
+                                if (ly >= l_ly_lo && ly < l_ly_hi) v -= left.col_data[ly + l_off];
+                                if (ly >= r_ly_lo && ly < r_ly_hi) v -= right.col_data[ly + r_off];
+                                if (v > col_best[ly]) col_best[ly] = v;
+                            }
                         }
                     }
 
-                    // Pass 3: horizontal cuts — resolve column ONCE per z
+                    // --- PASS 3: Horizontal cuts (dispatched on is_pure) ---
                     for (int z = 1; z < h; ++z) {
-                        ColumnView top    = resolve_column(w, z,     sx);
-                        ColumnView bottom = resolve_column(w, h - z, sx);
+                        const ColumnView top = resolve_column(w, z,     sx);
+                        const ColumnView bot = resolve_column(w, h - z, sx);
+                        const int32_t base = top.pure_val + bot.pure_val;
 
-                        const int t_offset = region.sheet_y_start - top.sheet_y_start;
-                        const int b_offset = (region.sheet_y_start + z) - bottom.sheet_y_start;
+                        if (top.is_pure && bot.is_pure) {
+                            for (int ly = 0; ly < y_span; ++ly)
+                                if (base > col_best[ly]) col_best[ly] = base;
 
-                        for (int ly = 0; ly < y_span; ++ly) {
-                            if (!is_impure[ly]) continue;
+                        } else if (bot.is_pure) {
+                            const int t_off = region.sheet_y_start - top.sheet_y_start;
+                            const int ly_lo = std::max(0,      -t_off);
+                            const int ly_hi = std::min(y_span, top.y_span - t_off);
 
-                            int32_t v_top = top.pure_val;
-                            if (!top.is_pure) {
-                                int t_ly = ly + t_offset;
-                                if (t_ly >= 0 && t_ly < top.y_span) v_top -= top.col_data[t_ly];
+                            for (int ly = 0; ly < ly_lo; ++ly)
+                                if (base > col_best[ly]) col_best[ly] = base;
+                            for (int ly = ly_lo; ly < ly_hi; ++ly) {
+                                const int32_t v = base - top.col_data[ly + t_off];
+                                if (v > col_best[ly]) col_best[ly] = v;
                             }
+                            for (int ly = ly_hi; ly < y_span; ++ly)
+                                if (base > col_best[ly]) col_best[ly] = base;
 
-                            int32_t v_bot = bottom.pure_val;
-                            if (!bottom.is_pure) {
-                                int t_ly = ly + b_offset;
-                                if (t_ly >= 0 && t_ly < bottom.y_span) v_bot -= bottom.col_data[t_ly];
+                        } else if (top.is_pure) {
+                            const int b_off = (region.sheet_y_start + z) - bot.sheet_y_start;
+                            const int ly_lo = std::max(0,      -b_off);
+                            const int ly_hi = std::min(y_span, bot.y_span - b_off);
+
+                            for (int ly = 0; ly < ly_lo; ++ly)
+                                if (base > col_best[ly]) col_best[ly] = base;
+                            for (int ly = ly_lo; ly < ly_hi; ++ly) {
+                                const int32_t v = base - bot.col_data[ly + b_off];
+                                if (v > col_best[ly]) col_best[ly] = v;
                             }
+                            for (int ly = ly_hi; ly < y_span; ++ly)
+                                if (base > col_best[ly]) col_best[ly] = base;
 
-                            const int32_t v = v_top + v_bot;
-                            if (v > col_best[ly]) col_best[ly] = v;
+                        } else {
+                            const int t_off = region.sheet_y_start - top.sheet_y_start;
+                            const int b_off = (region.sheet_y_start + z) - bot.sheet_y_start;
+                            const int t_ly_lo = std::max(0,      -t_off);
+                            const int t_ly_hi = std::min(y_span, top.y_span - t_off);
+                            const int b_ly_lo = std::max(0,      -b_off);
+                            const int b_ly_hi = std::min(y_span, bot.y_span - b_off);
+
+                            for (int ly = 0; ly < y_span; ++ly) {
+                                int32_t v = base;
+                                if (ly >= t_ly_lo && ly < t_ly_hi) v -= top.col_data[ly + t_off];
+                                if (ly >= b_ly_lo && ly < b_ly_hi) v -= bot.col_data[ly + b_off];
+                                if (v > col_best[ly]) col_best[ly] = v;
+                            }
                         }
                     }
 
-                    // Pass 4: write deltas
+                    // --- PASS 4: Finalize and clamp deltas ---
+                    uint16_t* const delta_col =
+                        deltas_.data() + region.delta_offset + lx * y_span;
+
                     for (int ly = 0; ly < y_span; ++ly) {
-                        if (!is_impure[ly]) continue;
                         int32_t delta = pure_val - col_best[ly];
                         if (delta > UINT16_MAX) {
                             overflow_ = true;
                             delta = UINT16_MAX;
                         }
-                        deltas_[region.delta_offset + lx * y_span + ly] =
-                            static_cast<uint16_t>(delta);
+                        delta_col[ly] = static_cast<uint16_t>(delta);
                     }
                 }
             }
@@ -436,9 +473,6 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
     }
 }
 
-bool            DefectTable::has_affected_positions(int w, int h) const {
-    return has_affected_[w * (sheet_height_ + 1) + h];
-}
 const uint16_t* DefectTable::deltas_data()  const { return deltas_.data(); }
 int64_t         DefectTable::total_deltas() const { return static_cast<int64_t>(deltas_.size()); }
 bool            DefectTable::overflow()     const { return overflow_; }

@@ -34,28 +34,36 @@ namespace gdcut {
              *  @param h Height
              *  @return Value for the given width and height
              */
-            int32_t value(int w, int h) const;
+            inline int32_t value(int w, int h) const { 
+                return values_[w * (sheet_height_ + 1) + h]; 
+            }
 
             /** @brief Get the decisions for a given width and height
             *  @param w Width
             *  @param h Height
             *  @return Decision for the given width and height
             */
-            Decision decision(int w, int h) const;
+            inline Decision decision(int w, int h) const {
+                return decisions_[w * (sheet_height_ + 1) + h];
+            }
 
             /** @brief Get the cut positions for a given width and height
             *  @param w Width
             *  @param h Height
             *  @return cut position for the given width and height
             */
-            int32_t cut_position(int w, int h) const;
+            inline int32_t cut_position(int w, int h) const {
+                return cut_positions_[w * (sheet_height_ + 1) + h];
+            }
 
             /** @brief Get the best item types for a given width and height
             *  @param w Width
             *  @param h Height
             *  @return Best item for the given width and height
             */
-            int32_t best_item(int w, int h) const;
+            inline int32_t best_item(int w, int h) const {
+                return best_items_[w * (sheet_height_ + 1) + h];
+            }
 
             /** @brief Get a pointer to the values data
              *  @return Pointer to the values data
