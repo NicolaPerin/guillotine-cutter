@@ -1,0 +1,1534 @@
+{
+  "problem": {
+    "defects": [
+      {
+        "height": 5,
+        "width": 2,
+        "x": 3,
+        "y": 2
+      },
+      {
+        "height": 2,
+        "width": 5,
+        "x": 10,
+        "y": 8
+      },
+      {
+        "height": 7,
+        "width": 1,
+        "x": 17,
+        "y": 20
+      },
+      {
+        "height": 2,
+        "width": 4,
+        "x": 22,
+        "y": 5
+      },
+      {
+        "height": 6,
+        "width": 3,
+        "x": 28,
+        "y": 35
+      },
+      {
+        "height": 2,
+        "width": 6,
+        "x": 35,
+        "y": 14
+      },
+      {
+        "height": 8,
+        "width": 2,
+        "x": 40,
+        "y": 50
+      },
+      {
+        "height": 3,
+        "width": 5,
+        "x": 45,
+        "y": 28
+      },
+      {
+        "height": 6,
+        "width": 1,
+        "x": 50,
+        "y": 62
+      },
+      {
+        "height": 2,
+        "width": 4,
+        "x": 55,
+        "y": 40
+      },
+      {
+        "height": 7,
+        "width": 2,
+        "x": 60,
+        "y": 18
+      },
+      {
+        "height": 3,
+        "width": 6,
+        "x": 65,
+        "y": 72
+      },
+      {
+        "height": 5,
+        "width": 3,
+        "x": 70,
+        "y": 45
+      },
+      {
+        "height": 8,
+        "width": 1,
+        "x": 75,
+        "y": 30
+      },
+      {
+        "height": 2,
+        "width": 4,
+        "x": 80,
+        "y": 58
+      },
+      {
+        "height": 6,
+        "width": 2,
+        "x": 85,
+        "y": 10
+      },
+      {
+        "height": 3,
+        "width": 5,
+        "x": 88,
+        "y": 80
+      },
+      {
+        "height": 4,
+        "width": 3,
+        "x": 12,
+        "y": 55
+      },
+      {
+        "height": 5,
+        "width": 2,
+        "x": 32,
+        "y": 78
+      },
+      {
+        "height": 2,
+        "width": 6,
+        "x": 58,
+        "y": 85
+      }
+    ],
+    "items": [
+      {
+        "height": 7,
+        "profit": 21,
+        "width": 3
+      },
+      {
+        "height": 3,
+        "profit": 21,
+        "width": 7
+      },
+      {
+        "height": 9,
+        "profit": 36,
+        "width": 4
+      },
+      {
+        "height": 4,
+        "profit": 36,
+        "width": 9
+      },
+      {
+        "height": 11,
+        "profit": 55,
+        "width": 5
+      },
+      {
+        "height": 5,
+        "profit": 55,
+        "width": 11
+      },
+      {
+        "height": 13,
+        "profit": 78,
+        "width": 6
+      },
+      {
+        "height": 6,
+        "profit": 78,
+        "width": 13
+      },
+      {
+        "height": 12,
+        "profit": 96,
+        "width": 8
+      },
+      {
+        "height": 8,
+        "profit": 96,
+        "width": 12
+      }
+    ],
+    "sheet_size": [
+      100,
+      100
+    ]
+  },
+  "solution": {
+    "cut_area": 9757,
+    "cut_sequence": {
+      "left": {
+        "left": {
+          "left": {
+            "left": {
+              "left": {
+                "item": 0,
+                "type": "fill"
+              },
+              "position": 3,
+              "right": {
+                "type": "defect"
+              },
+              "type": "cut_x"
+            },
+            "position": 7,
+            "right": {
+              "item": 4,
+              "type": "fill"
+            },
+            "type": "cut_y"
+          },
+          "position": 5,
+          "right": {
+            "left": {
+              "left": {
+                "item": 4,
+                "type": "fill"
+              },
+              "position": 5,
+              "right": {
+                "left": {
+                  "item": 9,
+                  "type": "fill"
+                },
+                "position": 8,
+                "right": {
+                  "left": {
+                    "left": {
+                      "left": {
+                        "type": "defect"
+                      },
+                      "position": 1,
+                      "right": {
+                        "left": {
+                          "type": "defect"
+                        },
+                        "position": 1,
+                        "right": {
+                          "item": 0,
+                          "type": "fill"
+                        },
+                        "type": "cut_y"
+                      },
+                      "type": "cut_y"
+                    },
+                    "position": 3,
+                    "right": {
+                      "left": {
+                        "left": {
+                          "type": "defect"
+                        },
+                        "position": 1,
+                        "right": {
+                          "left": {
+                            "type": "defect"
+                          },
+                          "position": 1,
+                          "right": {
+                            "item": 1,
+                            "type": "fill"
+                          },
+                          "type": "cut_x"
+                        },
+                        "type": "cut_x"
+                      },
+                      "position": 3,
+                      "right": {
+                        "left": {
+                          "item": 0,
+                          "type": "fill"
+                        },
+                        "position": 7,
+                        "right": {
+                          "left": {
+                            "left": {
+                              "item": 2,
+                              "type": "fill"
+                            },
+                            "position": 4,
+                            "right": {
+                              "left": {
+                                "type": "defect"
+                              },
+                              "position": 1,
+                              "right": {
+                                "item": 2,
+                                "type": "fill"
+                              },
+                              "type": "cut_x"
+                            },
+                            "type": "cut_x"
+                          },
+                          "position": 9,
+                          "right": {
+                            "item": 3,
+                            "type": "fill"
+                          },
+                          "type": "cut_y"
+                        },
+                        "type": "cut_y"
+                      },
+                      "type": "cut_y"
+                    },
+                    "type": "cut_x"
+                  },
+                  "position": 23,
+                  "right": {
+                    "item": 9,
+                    "type": "fill"
+                  },
+                  "type": "cut_y"
+                },
+                "type": "cut_y"
+              },
+              "type": "cut_x"
+            },
+            "position": 55,
+            "right": {
+              "left": {
+                "item": 1,
+                "type": "fill"
+              },
+              "position": 7,
+              "right": {
+                "left": {
+                  "left": {
+                    "type": "defect"
+                  },
+                  "position": 1,
+                  "right": {
+                    "left": {
+                      "type": "defect"
+                    },
+                    "position": 1,
+                    "right": {
+                      "left": {
+                        "type": "defect"
+                      },
+                      "position": 1,
+                      "right": {
+                        "left": {
+                          "type": "defect"
+                        },
+                        "position": 1,
+                        "right": {
+                          "item": 0,
+                          "type": "fill"
+                        },
+                        "type": "cut_y"
+                      },
+                      "type": "cut_y"
+                    },
+                    "type": "cut_y"
+                  },
+                  "type": "cut_y"
+                },
+                "position": 3,
+                "right": {
+                  "item": 1,
+                  "type": "fill"
+                },
+                "type": "cut_x"
+              },
+              "type": "cut_x"
+            },
+            "type": "cut_y"
+          },
+          "type": "cut_x"
+        },
+        "position": 73,
+        "right": {
+          "left": {
+            "item": 2,
+            "type": "fill"
+          },
+          "position": 4,
+          "right": {
+            "left": {
+              "item": 2,
+              "type": "fill"
+            },
+            "position": 4,
+            "right": {
+              "item": 1,
+              "type": "fill"
+            },
+            "type": "cut_x"
+          },
+          "type": "cut_x"
+        },
+        "type": "cut_y"
+      },
+      "position": 22,
+      "right": {
+        "left": {
+          "left": {
+            "left": {
+              "item": 5,
+              "type": "fill"
+            },
+            "position": 5,
+            "right": {
+              "left": {
+                "left": {
+                  "left": {
+                    "left": {
+                      "left": {
+                        "type": "defect"
+                      },
+                      "position": 1,
+                      "right": {
+                        "left": {
+                          "type": "defect"
+                        },
+                        "position": 1,
+                        "right": {
+                          "item": 2,
+                          "type": "fill"
+                        },
+                        "type": "cut_y"
+                      },
+                      "type": "cut_y"
+                    },
+                    "position": 4,
+                    "right": {
+                      "item": 4,
+                      "type": "fill"
+                    },
+                    "type": "cut_x"
+                  },
+                  "position": 11,
+                  "right": {
+                    "left": {
+                      "item": 3,
+                      "type": "fill"
+                    },
+                    "position": 4,
+                    "right": {
+                      "left": {
+                        "item": 3,
+                        "type": "fill"
+                      },
+                      "position": 4,
+                      "right": {
+                        "left": {
+                          "item": 3,
+                          "type": "fill"
+                        },
+                        "position": 4,
+                        "right": {
+                          "left": {
+                            "left": {
+                              "item": 6,
+                              "type": "fill"
+                            },
+                            "position": 6,
+                            "right": {
+                              "left": {
+                                "item": 0,
+                                "type": "fill"
+                              },
+                              "position": 7,
+                              "right": {
+                                "type": "defect"
+                              },
+                              "type": "cut_y"
+                            },
+                            "type": "cut_x"
+                          },
+                          "position": 13,
+                          "right": {
+                            "item": 3,
+                            "type": "fill"
+                          },
+                          "type": "cut_y"
+                        },
+                        "type": "cut_y"
+                      },
+                      "type": "cut_y"
+                    },
+                    "type": "cut_y"
+                  },
+                  "type": "cut_y"
+                },
+                "position": 9,
+                "right": {
+                  "left": {
+                    "item": 1,
+                    "type": "fill"
+                  },
+                  "position": 3,
+                  "right": {
+                    "left": {
+                      "item": 1,
+                      "type": "fill"
+                    },
+                    "position": 3,
+                    "right": {
+                      "left": {
+                        "item": 1,
+                        "type": "fill"
+                      },
+                      "position": 3,
+                      "right": {
+                        "left": {
+                          "left": {
+                            "left": {
+                              "left": {
+                                "item": 2,
+                                "type": "fill"
+                              },
+                              "position": 4,
+                              "right": {
+                                "left": {
+                                  "left": {
+                                    "type": "defect"
+                                  },
+                                  "position": 1,
+                                  "right": {
+                                    "left": {
+                                      "type": "defect"
+                                    },
+                                    "position": 1,
+                                    "right": {
+                                      "item": 0,
+                                      "type": "fill"
+                                    },
+                                    "type": "cut_y"
+                                  },
+                                  "type": "cut_y"
+                                },
+                                "position": 3,
+                                "right": {
+                                  "left": {
+                                    "left": {
+                                      "type": "defect"
+                                    },
+                                    "position": 1,
+                                    "right": {
+                                      "left": {
+                                        "type": "defect"
+                                      },
+                                      "position": 1,
+                                      "right": {
+                                        "item": 0,
+                                        "type": "fill"
+                                      },
+                                      "type": "cut_y"
+                                    },
+                                    "type": "cut_y"
+                                  },
+                                  "position": 3,
+                                  "right": {
+                                    "item": 2,
+                                    "type": "fill"
+                                  },
+                                  "type": "cut_x"
+                                },
+                                "type": "cut_x"
+                              },
+                              "type": "cut_x"
+                            },
+                            "position": 9,
+                            "right": {
+                              "left": {
+                                "item": 1,
+                                "type": "fill"
+                              },
+                              "position": 3,
+                              "right": {
+                                "left": {
+                                  "item": 0,
+                                  "type": "fill"
+                                },
+                                "position": 3,
+                                "right": {
+                                  "left": {
+                                    "item": 5,
+                                    "type": "fill"
+                                  },
+                                  "position": 5,
+                                  "right": {
+                                    "left": {
+                                      "item": 2,
+                                      "type": "fill"
+                                    },
+                                    "position": 4,
+                                    "right": {
+                                      "item": 1,
+                                      "type": "fill"
+                                    },
+                                    "type": "cut_x"
+                                  },
+                                  "type": "cut_y"
+                                },
+                                "type": "cut_x"
+                              },
+                              "type": "cut_y"
+                            },
+                            "type": "cut_y"
+                          },
+                          "position": 14,
+                          "right": {
+                            "left": {
+                              "left": {
+                                "item": 0,
+                                "type": "fill"
+                              },
+                              "position": 7,
+                              "right": {
+                                "left": {
+                                  "item": 0,
+                                  "type": "fill"
+                                },
+                                "position": 7,
+                                "right": {
+                                  "left": {
+                                    "left": {
+                                      "type": "defect"
+                                    },
+                                    "position": 1,
+                                    "right": {
+                                      "left": {
+                                        "type": "defect"
+                                      },
+                                      "position": 1,
+                                      "right": {
+                                        "left": {
+                                          "type": "defect"
+                                        },
+                                        "position": 1,
+                                        "right": {
+                                          "item": 2,
+                                          "type": "fill"
+                                        },
+                                        "type": "cut_y"
+                                      },
+                                      "type": "cut_y"
+                                    },
+                                    "type": "cut_y"
+                                  },
+                                  "position": 4,
+                                  "right": {
+                                    "left": {
+                                      "left": {
+                                        "type": "defect"
+                                      },
+                                      "position": 1,
+                                      "right": {
+                                        "item": 1,
+                                        "type": "fill"
+                                      },
+                                      "type": "cut_x"
+                                    },
+                                    "position": 3,
+                                    "right": {
+                                      "item": 2,
+                                      "type": "fill"
+                                    },
+                                    "type": "cut_y"
+                                  },
+                                  "type": "cut_x"
+                                },
+                                "type": "cut_y"
+                              },
+                              "type": "cut_y"
+                            },
+                            "position": 12,
+                            "right": {
+                              "left": {
+                                "item": 3,
+                                "type": "fill"
+                              },
+                              "position": 4,
+                              "right": {
+                                "left": {
+                                  "left": {
+                                    "left": {
+                                      "left": {
+                                        "item": 0,
+                                        "type": "fill"
+                                      },
+                                      "position": 3,
+                                      "right": {
+                                        "type": "defect"
+                                      },
+                                      "type": "cut_x"
+                                    },
+                                    "position": 7,
+                                    "right": {
+                                      "item": 4,
+                                      "type": "fill"
+                                    },
+                                    "type": "cut_y"
+                                  },
+                                  "position": 5,
+                                  "right": {
+                                    "item": 2,
+                                    "type": "fill"
+                                  },
+                                  "type": "cut_x"
+                                },
+                                "position": 18,
+                                "right": {
+                                  "item": 3,
+                                  "type": "fill"
+                                },
+                                "type": "cut_y"
+                              },
+                              "type": "cut_y"
+                            },
+                            "type": "cut_x"
+                          },
+                          "type": "cut_x"
+                        },
+                        "position": 26,
+                        "right": {
+                          "left": {
+                            "left": {
+                              "left": {
+                                "left": {
+                                  "item": 5,
+                                  "type": "fill"
+                                },
+                                "position": 5,
+                                "right": {
+                                  "left": {
+                                    "item": 5,
+                                    "type": "fill"
+                                  },
+                                  "position": 5,
+                                  "right": {
+                                    "left": {
+                                      "item": 3,
+                                      "type": "fill"
+                                    },
+                                    "position": 9,
+                                    "right": {
+                                      "type": "defect"
+                                    },
+                                    "type": "cut_x"
+                                  },
+                                  "type": "cut_y"
+                                },
+                                "type": "cut_y"
+                              },
+                              "position": 11,
+                              "right": {
+                                "left": {
+                                  "item": 2,
+                                  "type": "fill"
+                                },
+                                "position": 4,
+                                "right": {
+                                  "left": {
+                                    "item": 2,
+                                    "type": "fill"
+                                  },
+                                  "position": 4,
+                                  "right": {
+                                    "left": {
+                                      "left": {
+                                        "item": 4,
+                                        "type": "fill"
+                                      },
+                                      "position": 5,
+                                      "right": {
+                                        "left": {
+                                          "type": "defect"
+                                        },
+                                        "position": 1,
+                                        "right": {
+                                          "left": {
+                                            "type": "defect"
+                                          },
+                                          "position": 1,
+                                          "right": {
+                                            "item": 2,
+                                            "type": "fill"
+                                          },
+                                          "type": "cut_y"
+                                        },
+                                        "type": "cut_y"
+                                      },
+                                      "type": "cut_x"
+                                    },
+                                    "position": 11,
+                                    "right": {
+                                      "item": 0,
+                                      "type": "fill"
+                                    },
+                                    "type": "cut_y"
+                                  },
+                                  "type": "cut_x"
+                                },
+                                "type": "cut_x"
+                              },
+                              "type": "cut_x"
+                            },
+                            "position": 18,
+                            "right": {
+                              "item": 1,
+                              "type": "fill"
+                            },
+                            "type": "cut_y"
+                          },
+                          "position": 28,
+                          "right": {
+                            "item": 1,
+                            "type": "fill"
+                          },
+                          "type": "cut_x"
+                        },
+                        "type": "cut_y"
+                      },
+                      "type": "cut_y"
+                    },
+                    "type": "cut_y"
+                  },
+                  "type": "cut_y"
+                },
+                "type": "cut_x"
+              },
+              "position": 56,
+              "right": {
+                "left": {
+                  "left": {
+                    "item": 5,
+                    "type": "fill"
+                  },
+                  "position": 5,
+                  "right": {
+                    "left": {
+                      "item": 2,
+                      "type": "fill"
+                    },
+                    "position": 4,
+                    "right": {
+                      "item": 1,
+                      "type": "fill"
+                    },
+                    "type": "cut_x"
+                  },
+                  "type": "cut_y"
+                },
+                "position": 11,
+                "right": {
+                  "left": {
+                    "left": {
+                      "left": {
+                        "item": 5,
+                        "type": "fill"
+                      },
+                      "position": 11,
+                      "right": {
+                        "left": {
+                          "left": {
+                            "item": 0,
+                            "type": "fill"
+                          },
+                          "position": 3,
+                          "right": {
+                            "left": {
+                              "item": 0,
+                              "type": "fill"
+                            },
+                            "position": 3,
+                            "right": {
+                              "type": "defect"
+                            },
+                            "type": "cut_x"
+                          },
+                          "type": "cut_x"
+                        },
+                        "position": 7,
+                        "right": {
+                          "item": 1,
+                          "type": "fill"
+                        },
+                        "type": "cut_y"
+                      },
+                      "type": "cut_x"
+                    },
+                    "position": 10,
+                    "right": {
+                      "item": 3,
+                      "type": "fill"
+                    },
+                    "type": "cut_y"
+                  },
+                  "position": 18,
+                  "right": {
+                    "left": {
+                      "item": 4,
+                      "type": "fill"
+                    },
+                    "position": 11,
+                    "right": {
+                      "left": {
+                        "item": 1,
+                        "type": "fill"
+                      },
+                      "position": 7,
+                      "right": {
+                        "left": {
+                          "item": 1,
+                          "type": "fill"
+                        },
+                        "position": 7,
+                        "right": {
+                          "type": "defect"
+                        },
+                        "type": "cut_x"
+                      },
+                      "type": "cut_x"
+                    },
+                    "type": "cut_y"
+                  },
+                  "type": "cut_x"
+                },
+                "type": "cut_x"
+              },
+              "type": "cut_y"
+            },
+            "type": "cut_y"
+          },
+          "position": 44,
+          "right": {
+            "left": {
+              "left": {
+                "item": 2,
+                "type": "fill"
+              },
+              "position": 4,
+              "right": {
+                "left": {
+                  "left": {
+                    "item": 3,
+                    "type": "fill"
+                  },
+                  "position": 9,
+                  "right": {
+                    "left": {
+                      "item": 1,
+                      "type": "fill"
+                    },
+                    "position": 3,
+                    "right": {
+                      "left": {
+                        "item": 6,
+                        "type": "fill"
+                      },
+                      "position": 6,
+                      "right": {
+                        "left": {
+                          "left": {
+                            "item": 0,
+                            "type": "fill"
+                          },
+                          "position": 7,
+                          "right": {
+                            "left": {
+                              "type": "defect"
+                            },
+                            "position": 1,
+                            "right": {
+                              "left": {
+                                "type": "defect"
+                              },
+                              "position": 1,
+                              "right": {
+                                "item": 1,
+                                "type": "fill"
+                              },
+                              "type": "cut_x"
+                            },
+                            "type": "cut_x"
+                          },
+                          "type": "cut_y"
+                        },
+                        "position": 9,
+                        "right": {
+                          "item": 6,
+                          "type": "fill"
+                        },
+                        "type": "cut_x"
+                      },
+                      "type": "cut_x"
+                    },
+                    "type": "cut_y"
+                  },
+                  "type": "cut_x"
+                },
+                "position": 16,
+                "right": {
+                  "left": {
+                    "left": {
+                      "item": 4,
+                      "type": "fill"
+                    },
+                    "position": 5,
+                    "right": {
+                      "left": {
+                        "left": {
+                          "item": 0,
+                          "type": "fill"
+                        },
+                        "position": 3,
+                        "right": {
+                          "left": {
+                            "left": {
+                              "item": 5,
+                              "type": "fill"
+                            },
+                            "position": 5,
+                            "right": {
+                              "left": {
+                                "item": 2,
+                                "type": "fill"
+                              },
+                              "position": 4,
+                              "right": {
+                                "item": 1,
+                                "type": "fill"
+                              },
+                              "type": "cut_x"
+                            },
+                            "type": "cut_y"
+                          },
+                          "position": 11,
+                          "right": {
+                            "left": {
+                              "item": 5,
+                              "type": "fill"
+                            },
+                            "position": 5,
+                            "right": {
+                              "left": {
+                                "item": 2,
+                                "type": "fill"
+                              },
+                              "position": 4,
+                              "right": {
+                                "item": 1,
+                                "type": "fill"
+                              },
+                              "type": "cut_x"
+                            },
+                            "type": "cut_y"
+                          },
+                          "type": "cut_x"
+                        },
+                        "type": "cut_x"
+                      },
+                      "position": 14,
+                      "right": {
+                        "left": {
+                          "type": "defect"
+                        },
+                        "position": 1,
+                        "right": {
+                          "item": 9,
+                          "type": "fill"
+                        },
+                        "type": "cut_x"
+                      },
+                      "type": "cut_y"
+                    },
+                    "type": "cut_x"
+                  },
+                  "position": 22,
+                  "right": {
+                    "left": {
+                      "left": {
+                        "left": {
+                          "left": {
+                            "item": 0,
+                            "type": "fill"
+                          },
+                          "position": 7,
+                          "right": {
+                            "type": "defect"
+                          },
+                          "type": "cut_y"
+                        },
+                        "position": 3,
+                        "right": {
+                          "left": {
+                            "item": 1,
+                            "type": "fill"
+                          },
+                          "position": 7,
+                          "right": {
+                            "item": 8,
+                            "type": "fill"
+                          },
+                          "type": "cut_x"
+                        },
+                        "type": "cut_x"
+                      },
+                      "position": 12,
+                      "right": {
+                        "item": 3,
+                        "type": "fill"
+                      },
+                      "type": "cut_y"
+                    },
+                    "position": 18,
+                    "right": {
+                      "item": 9,
+                      "type": "fill"
+                    },
+                    "type": "cut_x"
+                  },
+                  "type": "cut_y"
+                },
+                "type": "cut_y"
+              },
+              "type": "cut_x"
+            },
+            "position": 54,
+            "right": {
+              "left": {
+                "left": {
+                  "item": 3,
+                  "type": "fill"
+                },
+                "position": 4,
+                "right": {
+                  "left": {
+                    "left": {
+                      "item": 1,
+                      "type": "fill"
+                    },
+                    "position": 3,
+                    "right": {
+                      "left": {
+                        "left": {
+                          "item": 4,
+                          "type": "fill"
+                        },
+                        "position": 11,
+                        "right": {
+                          "type": "defect"
+                        },
+                        "type": "cut_y"
+                      },
+                      "position": 5,
+                      "right": {
+                        "item": 0,
+                        "type": "fill"
+                      },
+                      "type": "cut_x"
+                    },
+                    "type": "cut_y"
+                  },
+                  "position": 14,
+                  "right": {
+                    "left": {
+                      "left": {
+                        "left": {
+                          "type": "defect"
+                        },
+                        "position": 1,
+                        "right": {
+                          "left": {
+                            "type": "defect"
+                          },
+                          "position": 1,
+                          "right": {
+                            "item": 2,
+                            "type": "fill"
+                          },
+                          "type": "cut_y"
+                        },
+                        "type": "cut_y"
+                      },
+                      "position": 4,
+                      "right": {
+                        "left": {
+                          "item": 3,
+                          "type": "fill"
+                        },
+                        "position": 4,
+                        "right": {
+                          "item": 0,
+                          "type": "fill"
+                        },
+                        "type": "cut_y"
+                      },
+                      "type": "cut_x"
+                    },
+                    "position": 11,
+                    "right": {
+                      "item": 7,
+                      "type": "fill"
+                    },
+                    "type": "cut_y"
+                  },
+                  "type": "cut_x"
+                },
+                "type": "cut_y"
+              },
+              "position": 27,
+              "right": {
+                "item": 1,
+                "type": "fill"
+              },
+              "type": "cut_x"
+            },
+            "type": "cut_y"
+          },
+          "type": "cut_x"
+        },
+        "position": 75,
+        "right": {
+          "left": {
+            "left": {
+              "item": 1,
+              "type": "fill"
+            },
+            "position": 3,
+            "right": {
+              "left": {
+                "item": 4,
+                "type": "fill"
+              },
+              "position": 5,
+              "right": {
+                "left": {
+                  "item": 4,
+                  "type": "fill"
+                },
+                "position": 5,
+                "right": {
+                  "left": {
+                    "left": {
+                      "left": {
+                        "left": {
+                          "type": "defect"
+                        },
+                        "position": 1,
+                        "right": {
+                          "left": {
+                            "type": "defect"
+                          },
+                          "position": 1,
+                          "right": {
+                            "item": 5,
+                            "type": "fill"
+                          },
+                          "type": "cut_x"
+                        },
+                        "type": "cut_x"
+                      },
+                      "position": 5,
+                      "right": {
+                        "item": 7,
+                        "type": "fill"
+                      },
+                      "type": "cut_y"
+                    },
+                    "position": 13,
+                    "right": {
+                      "item": 4,
+                      "type": "fill"
+                    },
+                    "type": "cut_x"
+                  },
+                  "position": 11,
+                  "right": {
+                    "left": {
+                      "left": {
+                        "item": 3,
+                        "type": "fill"
+                      },
+                      "position": 4,
+                      "right": {
+                        "item": 0,
+                        "type": "fill"
+                      },
+                      "type": "cut_y"
+                    },
+                    "position": 9,
+                    "right": {
+                      "left": {
+                        "item": 3,
+                        "type": "fill"
+                      },
+                      "position": 4,
+                      "right": {
+                        "item": 0,
+                        "type": "fill"
+                      },
+                      "type": "cut_y"
+                    },
+                    "type": "cut_x"
+                  },
+                  "type": "cut_y"
+                },
+                "type": "cut_x"
+              },
+              "type": "cut_x"
+            },
+            "type": "cut_y"
+          },
+          "position": 28,
+          "right": {
+            "left": {
+              "left": {
+                "item": 1,
+                "type": "fill"
+              },
+              "position": 3,
+              "right": {
+                "left": {
+                  "left": {
+                    "item": 3,
+                    "type": "fill"
+                  },
+                  "position": 4,
+                  "right": {
+                    "left": {
+                      "item": 2,
+                      "type": "fill"
+                    },
+                    "position": 4,
+                    "right": {
+                      "left": {
+                        "left": {
+                          "item": 1,
+                          "type": "fill"
+                        },
+                        "position": 3,
+                        "right": {
+                          "left": {
+                            "left": {
+                              "item": 2,
+                              "type": "fill"
+                            },
+                            "position": 4,
+                            "right": {
+                              "left": {
+                                "type": "defect"
+                              },
+                              "position": 1,
+                              "right": {
+                                "left": {
+                                  "type": "defect"
+                                },
+                                "position": 1,
+                                "right": {
+                                  "item": 0,
+                                  "type": "fill"
+                                },
+                                "type": "cut_y"
+                              },
+                              "type": "cut_y"
+                            },
+                            "type": "cut_x"
+                          },
+                          "position": 9,
+                          "right": {
+                            "item": 1,
+                            "type": "fill"
+                          },
+                          "type": "cut_y"
+                        },
+                        "type": "cut_y"
+                      },
+                      "position": 7,
+                      "right": {
+                        "left": {
+                          "item": 1,
+                          "type": "fill"
+                        },
+                        "position": 3,
+                        "right": {
+                          "left": {
+                            "left": {
+                              "left": {
+                                "type": "defect"
+                              },
+                              "position": 1,
+                              "right": {
+                                "left": {
+                                  "type": "defect"
+                                },
+                                "position": 1,
+                                "right": {
+                                  "item": 0,
+                                  "type": "fill"
+                                },
+                                "type": "cut_y"
+                              },
+                              "type": "cut_y"
+                            },
+                            "position": 3,
+                            "right": {
+                              "item": 2,
+                              "type": "fill"
+                            },
+                            "type": "cut_x"
+                          },
+                          "position": 9,
+                          "right": {
+                            "item": 1,
+                            "type": "fill"
+                          },
+                          "type": "cut_y"
+                        },
+                        "type": "cut_y"
+                      },
+                      "type": "cut_x"
+                    },
+                    "type": "cut_x"
+                  },
+                  "type": "cut_y"
+                },
+                "position": 18,
+                "right": {
+                  "item": 4,
+                  "type": "fill"
+                },
+                "type": "cut_x"
+              },
+              "type": "cut_y"
+            },
+            "position": 28,
+            "right": {
+              "left": {
+                "item": 5,
+                "type": "fill"
+              },
+              "position": 5,
+              "right": {
+                "left": {
+                  "left": {
+                    "item": 4,
+                    "type": "fill"
+                  },
+                  "position": 5,
+                  "right": {
+                    "left": {
+                      "item": 4,
+                      "type": "fill"
+                    },
+                    "position": 5,
+                    "right": {
+                      "left": {
+                        "left": {
+                          "type": "defect"
+                        },
+                        "position": 1,
+                        "right": {
+                          "left": {
+                            "type": "defect"
+                          },
+                          "position": 1,
+                          "right": {
+                            "left": {
+                              "type": "defect"
+                            },
+                            "position": 1,
+                            "right": {
+                              "left": {
+                                "type": "defect"
+                              },
+                              "position": 1,
+                              "right": {
+                                "left": {
+                                  "type": "defect"
+                                },
+                                "position": 1,
+                                "right": {
+                                  "item": 1,
+                                  "type": "fill"
+                                },
+                                "type": "cut_x"
+                              },
+                              "type": "cut_x"
+                            },
+                            "type": "cut_x"
+                          },
+                          "type": "cut_x"
+                        },
+                        "type": "cut_x"
+                      },
+                      "position": 3,
+                      "right": {
+                        "item": 9,
+                        "type": "fill"
+                      },
+                      "type": "cut_y"
+                    },
+                    "type": "cut_x"
+                  },
+                  "type": "cut_x"
+                },
+                "position": 11,
+                "right": {
+                  "left": {
+                    "item": 2,
+                    "type": "fill"
+                  },
+                  "position": 4,
+                  "right": {
+                    "left": {
+                      "item": 2,
+                      "type": "fill"
+                    },
+                    "position": 4,
+                    "right": {
+                      "item": 1,
+                      "type": "fill"
+                    },
+                    "type": "cut_x"
+                  },
+                  "type": "cut_x"
+                },
+                "type": "cut_y"
+              },
+              "type": "cut_y"
+            },
+            "type": "cut_x"
+          },
+          "type": "cut_x"
+        },
+        "type": "cut_y"
+      },
+      "type": "cut_x"
+    },
+    "defect_area": 234,
+    "defect_loss": "234/10000 (2.3%)",
+    "efficiency": "9757/9766 (99.9%)",
+    "total_area": 10000,
+    "usable_area": 9766,
+    "utilization": "9757/10000 (97.6%)"
+  }
+}

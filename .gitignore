@@ -19,3 +19,21 @@ Makefile
 # OS files
 .DS_Store
 Thumbs.db
+
+# Python
+src/guillotine/
+src/guillotine_cutter.egg-info/
+tests/__pycache__/
+.venv/
+.coverage
+.pytest_cache/
+
+
+# Results and outputs
+output/
+results/
+scalability/
+wavefront_profile.csv
+wavefront_profile.png
+generate_scalability_problems.py
+plot_wavefront.py

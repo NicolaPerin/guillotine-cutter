@@ -277,6 +277,38 @@ int32_t DefectTable::lookup(int w, int h, int sx, int sy) const {
 
 int32_t DefectTable::value(int w, int h, int sx, int sy) const { return lookup(w, h, sx, sy); }
 
+DefectTable::ColumnView DefectTable::resolve_column(int w, int h, int sx) const {
+    const int    stride   = sheet_height_ + 1;
+    const int    wh_idx   = w * stride + h;
+    const int32_t pure_val = pure_table_.value(w, h);
+
+    if (!has_affected_[wh_idx])
+        return {pure_val, true, 0, 0, nullptr};
+
+    const AffectedRegionIndex& idx = region_index_[wh_idx];
+
+    int lo = 0, hi = idx.region_count - 1;
+    while (lo <= hi) {
+        int mid = lo + (hi - lo) / 2;
+        const AffectedRegion& r = regions_[idx.regions_offset + mid];
+        if      (sx < r.sheet_x_start)                hi = mid - 1;
+        else if (sx > r.sheet_x_start + r.width - 1)  lo = mid + 1;
+        else {
+            int lx = sx - r.sheet_x_start;
+            return {pure_val, false, r.height, r.sheet_y_start,
+                    &deltas_[r.delta_offset + lx * r.height]};
+        }
+    }
+    return {pure_val, true, 0, 0, nullptr};
+}
+
+int32_t DefectTable::column_get(const ColumnView& cv, int sy) const {
+    if (cv.is_pure) return cv.pure_val;
+    int ly = sy - cv.sheet_y_start;
+    if (ly < 0 || ly >= cv.y_span) return cv.pure_val;
+    return cv.pure_val - cv.col_data[ly];
+}
+
 // For each position in each AffectedRegion, computes the optimal value by
 // trying all guillotine cuts and stores delta = pure_value - best_value.
 //
@@ -291,9 +323,14 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
                                int stride,
                                int min_item_width,
                                int min_item_height) {
+    // col_best[ly] — best value found so far for position ly in current column
+    // is_impure[ly] — true if position (sx, sheet_y_start+ly) overlaps a defect
+    // Allocated once and reused across all columns to avoid repeated allocation.
+    std::vector<int32_t> col_best;
+    std::vector<uint8_t> is_impure;
+
     for (int w = min_item_width; w <= sheet_width_; ++w) {
         for (int h = min_item_height; h <= sheet_height_; ++h) {
-            
             int wh_idx = w * stride + h;
             if (!has_affected_[wh_idx]) continue;
 
@@ -302,50 +339,66 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
 
             for (int r = 0; r < idx.region_count; ++r) {
                 const AffectedRegion& region = regions_[idx.regions_offset + r];
+                const int y_span = region.height;
+
+                if ((int)col_best.size()  < y_span) col_best.resize(y_span);
+                if ((int)is_impure.size() < y_span) is_impure.resize(y_span);
 
                 for (int lx = 0; lx < region.width; ++lx) {
-                    int sx = region.sheet_x_start + lx;
+                    const int sx = region.sheet_x_start + lx;
 
-                    for (int ly = 0; ly < region.height; ++ly) {
-                        int sy = region.sheet_y_start + ly;
-
-                        // pure position — rectangle contains no defective cells
-                        if (defect_map.count_defective_cells_in_rectangle(sx, sy, sx + w, sy + h) == 0) {
-                            deltas_[region.delta_offset + lx * region.height + ly] = 0;
-                            continue;
+                    // Pass 1: classify each sy as pure or impure
+                    int impure_count = 0;
+                    for (int ly = 0; ly < y_span; ++ly) {
+                        const int sy = region.sheet_y_start + ly;
+                        if (defect_map.count_defective_cells_in_rectangle(
+                                sx, sy, sx + w, sy + h) == 0) {
+                            deltas_[region.delta_offset + lx * y_span + ly] = 0;
+                            is_impure[ly] = 0;
+                        } else {
+                            is_impure[ly] = 1;
+                            col_best[ly]  = 0;
+                            ++impure_count;
                         }
+                    }
 
-                        // impure — try all vertical and horizontal cuts
-                        int32_t best = 0;
+                    if (impure_count == 0) continue;
 
-                        // vertical cuts: split width at z
-                        for (int z = 1; z < w; ++z) {
-                            int32_t v = lookup(z,     h, sx,     sy)
-                                      + lookup(w - z, h, sx + z, sy);
-                            if (v > best) best = v;
+                    // Pass 2: vertical cuts — resolve column ONCE per z
+                    for (int z = 1; z < w; ++z) {
+                        ColumnView left  = resolve_column(z,     h, sx);
+                        ColumnView right = resolve_column(w - z, h, sx + z);
+                        for (int ly = 0; ly < y_span; ++ly) {
+                            if (!is_impure[ly]) continue;
+                            const int sy = region.sheet_y_start + ly;
+                            const int32_t v = column_get(left,  sy)
+                                            + column_get(right, sy);
+                            if (v > col_best[ly]) col_best[ly] = v;
                         }
+                    }
 
-                        // horizontal cuts: split height at z
-                        for (int z = 1; z < h; ++z) {
-                            int32_t v = lookup(w, z,     sx, sy)
-                                      + lookup(w, h - z, sx, sy + z);
-                            if (v > best) best = v;
+                    // Pass 3: horizontal cuts — resolve column ONCE per z
+                    for (int z = 1; z < h; ++z) {
+                        ColumnView top    = resolve_column(w, z,     sx);
+                        ColumnView bottom = resolve_column(w, h - z, sx);
+                        for (int ly = 0; ly < y_span; ++ly) {
+                            if (!is_impure[ly]) continue;
+                            const int sy = region.sheet_y_start + ly;
+                            const int32_t v = column_get(top,    sy)
+                                            + column_get(bottom, sy + z);
+                            if (v > col_best[ly]) col_best[ly] = v;
                         }
+                    }
 
-                        // delta = how much worse this position is than pure
-                        int32_t delta = pure_val - best;
-
-                        // Note: delta overflow (pure_val - best > UINT16_MAX) is theoretically
-                        // possible for large items where a defect causes total value loss.
-                        // In practice this regime corresponds to sparse raster points where the
-                        // recursive solver is both faster and uses int32_t storage; the dispatch
-                        // mechanism will route such problems there before DefectTable is constructed.
-                        // The overflow_ flag is set as a safety net for unexpected cases.
+                    // Pass 4: write deltas
+                    for (int ly = 0; ly < y_span; ++ly) {
+                        if (!is_impure[ly]) continue;
+                        int32_t delta = pure_val - col_best[ly];
                         if (delta > UINT16_MAX) {
                             overflow_ = true;
                             delta = UINT16_MAX;
                         }
-                        deltas_[region.delta_offset + lx * region.height + ly] =
+                        deltas_[region.delta_offset + lx * y_span + ly] =
                             static_cast<uint16_t>(delta);
                     }
                 }
@@ -353,6 +406,8 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
         }
     }
 }
+
+
 
 bool            DefectTable::has_affected_positions(int w, int h) const {
     return has_affected_[w * (sheet_height_ + 1) + h];

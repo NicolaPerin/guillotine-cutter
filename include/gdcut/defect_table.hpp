@@ -63,7 +63,20 @@ namespace gdcut {
             const PureTable&                  pure_table_;
             bool                              overflow_;
 
-            private:
+            // Lightweight view into a single column of delta data for one (w,h,sx).
+            // Resolved once per (w,h,sx) via resolve_column() — avoids repeated
+            // binary search in the inner ly loop of fill_deltas().
+            struct ColumnView {
+                int32_t         pure_val;
+                bool            is_pure;
+                int             y_span;
+                int             sheet_y_start;
+                const uint16_t* col_data;  // nullptr if pure
+            };
+
+            ColumnView resolve_column(int w, int h, int sx) const;
+            int32_t    column_get(const ColumnView& cv, int sy) const;
+
             /** @brief Computes affected position intervals for a single (w,h) pair. */
             int compute_overlap_intervals(const Problem& problem,
                                         std::vector<OverlapRegion>& scratch,
