@@ -287,6 +287,7 @@ DefectTable::ColumnView DefectTable::resolve_column(int w, int h, int sx) const 
 
     const AffectedRegionIndex& idx = region_index_[wh_idx];
 
+    // binary search
     int lo = 0, hi = idx.region_count - 1;
     while (lo <= hi) {
         int mid = lo + (hi - lo) / 2;
@@ -323,11 +324,10 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
                                int stride,
                                int min_item_width,
                                int min_item_height) {
-    // col_best[ly] — best value found so far for position ly in current column
-    // is_impure[ly] — true if position (sx, sheet_y_start+ly) overlaps a defect
-    // Allocated once and reused across all columns to avoid repeated allocation.
-    std::vector<int32_t> col_best;
-    std::vector<uint8_t> is_impure;
+    // Allocated ONCE to maximum possible size.
+    // Capacity covers any y_span up to the full sheet height.
+    std::vector<int32_t> col_best(sheet_height_ + 1);
+    std::vector<uint8_t> is_impure(sheet_height_ + 1);
 
     for (int w = min_item_width; w <= sheet_width_; ++w) {
         for (int h = min_item_height; h <= sheet_height_; ++h) {
@@ -341,8 +341,7 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
                 const AffectedRegion& region = regions_[idx.regions_offset + r];
                 const int y_span = region.height;
 
-                if ((int)col_best.size()  < y_span) col_best.resize(y_span);
-                if ((int)is_impure.size() < y_span) is_impure.resize(y_span);
+                // Dynamic resize removed here. Vectors already possess sufficient capacity.
 
                 for (int lx = 0; lx < region.width; ++lx) {
                     const int sx = region.sheet_x_start + lx;
@@ -368,11 +367,26 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
                     for (int z = 1; z < w; ++z) {
                         ColumnView left  = resolve_column(z,     h, sx);
                         ColumnView right = resolve_column(w - z, h, sx + z);
+                        
+                        const int l_offset = region.sheet_y_start - left.sheet_y_start;
+                        const int r_offset = region.sheet_y_start - right.sheet_y_start;
+
                         for (int ly = 0; ly < y_span; ++ly) {
                             if (!is_impure[ly]) continue;
-                            const int sy = region.sheet_y_start + ly;
-                            const int32_t v = column_get(left,  sy)
-                                            + column_get(right, sy);
+                            
+                            int32_t v_left = left.pure_val;
+                            if (!left.is_pure) {
+                                int t_ly = ly + l_offset;
+                                if (t_ly >= 0 && t_ly < left.y_span) v_left -= left.col_data[t_ly];
+                            }
+
+                            int32_t v_right = right.pure_val;
+                            if (!right.is_pure) {
+                                int t_ly = ly + r_offset;
+                                if (t_ly >= 0 && t_ly < right.y_span) v_right -= right.col_data[t_ly];
+                            }
+
+                            const int32_t v = v_left + v_right;
                             if (v > col_best[ly]) col_best[ly] = v;
                         }
                     }
@@ -381,11 +395,26 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
                     for (int z = 1; z < h; ++z) {
                         ColumnView top    = resolve_column(w, z,     sx);
                         ColumnView bottom = resolve_column(w, h - z, sx);
+
+                        const int t_offset = region.sheet_y_start - top.sheet_y_start;
+                        const int b_offset = (region.sheet_y_start + z) - bottom.sheet_y_start;
+
                         for (int ly = 0; ly < y_span; ++ly) {
                             if (!is_impure[ly]) continue;
-                            const int sy = region.sheet_y_start + ly;
-                            const int32_t v = column_get(top,    sy)
-                                            + column_get(bottom, sy + z);
+
+                            int32_t v_top = top.pure_val;
+                            if (!top.is_pure) {
+                                int t_ly = ly + t_offset;
+                                if (t_ly >= 0 && t_ly < top.y_span) v_top -= top.col_data[t_ly];
+                            }
+
+                            int32_t v_bot = bottom.pure_val;
+                            if (!bottom.is_pure) {
+                                int t_ly = ly + b_offset;
+                                if (t_ly >= 0 && t_ly < bottom.y_span) v_bot -= bottom.col_data[t_ly];
+                            }
+
+                            const int32_t v = v_top + v_bot;
                             if (v > col_best[ly]) col_best[ly] = v;
                         }
                     }
@@ -406,8 +435,6 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
         }
     }
 }
-
-
 
 bool            DefectTable::has_affected_positions(int w, int h) const {
     return has_affected_[w * (sheet_height_ + 1) + h];
