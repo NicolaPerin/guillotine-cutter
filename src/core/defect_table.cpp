@@ -310,7 +310,15 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
 
 #pragma omp parallel if(enable_parallel) reduction(|:overflow_seen)
 {
-    std::vector<int32_t> col_best(sheet_height_ + 1);
+    const int thread_id = omp_get_thread_num();
+    const int num_threads = omp_get_num_threads();
+
+    // Thread-local 2D workspace to accumulate region maximums.
+    // Sized to the maximum possible region dimensions to prevent reallocation.
+    std::vector<int32_t> local_best((sheet_width_ + 1) * (sheet_height_ + 1));
+    std::vector<uint8_t> col_is_impure(sheet_width_ + 1);
+    std::vector<int32_t> max_pure_vert(sheet_width_ + 1);
+    std::vector<int32_t> max_pure_horiz(sheet_width_ + 1);
 
     for (int w = min_item_width; w <= sheet_width_; ++w) {
         for (int h = min_item_height; h <= sheet_height_; ++h) {
@@ -323,74 +331,77 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
             for (int r = 0; r < idx.region_count; ++r) {
                 const AffectedRegion& region = regions_[idx.regions_offset + r];
                 const int y_span = region.height;
+                const int r_width = region.width;
 
-#pragma omp for schedule(static, 4)
-                for (int lx = 0; lx < region.width; ++lx) {
+                // Manual static scheduling: divide the region's width among threads.
+                // This replaces '#pragma omp for', eliminating synchronization overhead
+                // and allowing safe, contiguous thread-local accumulation.
+                const int chunk_size = (r_width + num_threads - 1) / num_threads;
+                const int lx_start   = std::min(thread_id * chunk_size, r_width);
+                const int lx_end     = std::min(lx_start + chunk_size, r_width);
+
+                if (lx_start >= lx_end) continue; // Thread has no assigned work for this region
+
+                // --- PASS 1: Defect classification + local_best seeding ---
+                for (int lx = lx_start; lx < lx_end; ++lx) {
+                    const int local_lx = lx - lx_start;
                     const int sx = region.sheet_x_start + lx;
+                    
+                    max_pure_vert[local_lx]  = 0;
+                    max_pure_horiz[local_lx] = 0;
 
-                    // --- PASS 1: Defect classification + col_best seeding ---
                     const int32_t* const col_right = prefix_base + (sx + w) * p_stride;
                     const int32_t* const col_left  = prefix_base + sx       * p_stride;
 
                     int impure_count = 0;
+                    int32_t* const c_best = local_best.data() + local_lx * y_span;
+
                     for (int ly = 0; ly < y_span; ++ly) {
                         const int sy = region.sheet_y_start + ly;
                         const int defects = col_right[sy + h] - col_left[sy + h]
                                           - col_right[sy]     + col_left[sy];
-                        // Branchless: pure → pure_val, impure → 0.
-                        // (defects == 0) is 1 for pure, 0 for impure.
-                        col_best[ly] = (defects == 0) ? pure_val : 0;
+                        c_best[ly] = (defects == 0) ? pure_val : 0;
                         impure_count += (defects != 0);
                     }
+                    col_is_impure[local_lx] = (impure_count > 0) ? 1 : 0;
+                }
 
-                    if (impure_count == 0) continue;
+                // --- PASS 2: Vertical cuts (z is the OUTER loop) ---
+                // Iterating z externally allows the CPU hardware prefetcher to load
+                // contiguous column segments linearly as lx increments internally.
+                for (int z = 1; z < w; ++z) {
+                    for (int lx = lx_start; lx < lx_end; ++lx) {
+                        const int local_lx = lx - lx_start;
+                        if (!col_is_impure[local_lx]) continue;
 
-                    // --- PASS 2: Vertical cuts (dispatched on is_pure) ---
-                    int32_t max_pure_vert  = 0;
-                    int32_t max_pure_horiz = 0;
-                    
-                    for (int z = 1; z < w; ++z) {
-
+                        const int sx = region.sheet_x_start + lx;
                         const ColumnView left  = resolve_column(z,     h, sx);
                         const ColumnView right = resolve_column(w - z, h, sx + z);
                         const int32_t base = left.pure_val + right.pure_val;
+                        int32_t* const c_best = local_best.data() + local_lx * y_span;
 
                         if (left.is_pure && right.is_pure) {
-                            // Constant v across ly — pure max-update.
-                            max_pure_vert = std::max(max_pure_vert, base);
+                            max_pure_vert[local_lx] = std::max(max_pure_vert[local_lx], base);
 
                         } else if (right.is_pure) {
-                            // Only `left` carries deltas.
                             const int l_off = region.sheet_y_start - left.sheet_y_start;
                             const int ly_lo = std::max(0,      -l_off);
                             const int ly_hi = std::min(y_span, left.y_span - l_off);
 
-                            for (int ly = 0; ly < ly_lo; ++ly) col_best[ly] = std::max(col_best[ly], base);
-
-                            for (int ly = ly_lo; ly < ly_hi; ++ly) {
-                                const int32_t v = base - left.col_data[ly + l_off];
-                                col_best[ly] = std::max(col_best[ly], v);
-                            }
-
-                            for (int ly = ly_hi; ly < y_span; ++ly) col_best[ly] = std::max(col_best[ly], base);
+                            for (int ly = 0; ly < ly_lo; ++ly) c_best[ly] = std::max(c_best[ly], base);
+                            for (int ly = ly_lo; ly < ly_hi; ++ly) c_best[ly] = std::max(c_best[ly], base - left.col_data[ly + l_off]);
+                            for (int ly = ly_hi; ly < y_span; ++ly) c_best[ly] = std::max(c_best[ly], base);
 
                         } else if (left.is_pure) {
-                            // Only `right` carries deltas.
                             const int r_off = region.sheet_y_start - right.sheet_y_start;
                             const int ly_lo = std::max(0,      -r_off);
                             const int ly_hi = std::min(y_span, right.y_span - r_off);
 
-                            for (int ly = 0; ly < ly_lo; ++ly) col_best[ly] = std::max(col_best[ly], base);
-
-                            for (int ly = ly_lo; ly < ly_hi; ++ly) {
-                                const int32_t v = base - right.col_data[ly + r_off];
-                                col_best[ly] = std::max(col_best[ly], v);
-                            }
-
-                            for (int ly = ly_hi; ly < y_span; ++ly) col_best[ly] = std::max(col_best[ly], base);
+                            for (int ly = 0; ly < ly_lo; ++ly) c_best[ly] = std::max(c_best[ly], base);
+                            for (int ly = ly_lo; ly < ly_hi; ++ly) c_best[ly] = std::max(c_best[ly], base - right.col_data[ly + r_off]);
+                            for (int ly = ly_hi; ly < y_span; ++ly) c_best[ly] = std::max(c_best[ly], base);
 
                         } else {
-                            // Both columns carry deltas.
                             const int l_off = region.sheet_y_start - left.sheet_y_start;
                             const int r_off = region.sheet_y_start - right.sheet_y_start;
                             const int l_ly_lo = std::max(0,      -l_off);
@@ -398,80 +409,63 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
                             const int r_ly_lo = std::max(0,      -r_off);
                             const int r_ly_hi = std::min(y_span, right.y_span - r_off);
 
-                            if (l_ly_lo == 0 && l_ly_hi == y_span &&
-                                r_ly_lo == 0 && r_ly_hi == y_span) {
-                                
-                                // Fast path: both columns fully cover the bounding box.
+                            if (l_ly_lo == 0 && l_ly_hi == y_span && r_ly_lo == 0 && r_ly_hi == y_span) {
                                 const uint16_t* l_data = left.col_data  + l_off;
                                 const uint16_t* r_data = right.col_data + r_off;
-                                int32_t* cb = col_best.data();
-                                
                                 for (int ly = 0; ly < y_span; ++ly) {
-                                    const int32_t v = base - l_data[ly] - r_data[ly];
-                                    cb[ly] = std::max(cb[ly], v);
+                                    c_best[ly] = std::max(c_best[ly], base - l_data[ly] - r_data[ly]);
                                 }
                             } else {
-                                // Slow path: Converted to branchless masking to allow vectorization
                                 for (int ly = 0; ly < y_span; ++ly) {
                                     const int32_t in_left  = (ly >= l_ly_lo && ly < l_ly_hi);
                                     const int32_t in_right = (ly >= r_ly_lo && ly < r_ly_hi);
-
                                     const int l_idx = in_left  ? (ly + l_off) : 0;
                                     const int r_idx = in_right ? (ly + r_off) : 0;
 
                                     int32_t v = base;
                                     v -= left.col_data[l_idx] * in_left;
                                     v -= right.col_data[r_idx] * in_right;
-
-                                    col_best[ly] = std::max(col_best[ly], v);
+                                    c_best[ly] = std::max(c_best[ly], v);
                                 }
                             }
                         }
                     }
+                }
 
-                    // --- PASS 3: Horizontal cuts (dispatched on is_pure) ---
-                    for (int z = 1; z < h; ++z) {
+                // --- PASS 3: Horizontal cuts (z is the OUTER loop) ---
+                for (int z = 1; z < h; ++z) {
+                    for (int lx = lx_start; lx < lx_end; ++lx) {
+                        const int local_lx = lx - lx_start;
+                        if (!col_is_impure[local_lx]) continue;
 
+                        const int sx = region.sheet_x_start + lx;
                         const ColumnView top = resolve_column(w, z,     sx);
                         const ColumnView bot = resolve_column(w, h - z, sx);
                         const int32_t base = top.pure_val + bot.pure_val;
+                        int32_t* const c_best = local_best.data() + local_lx * y_span;
 
                         if (top.is_pure && bot.is_pure) {
-                            // Constant v across ly — pure max-update.
-                            max_pure_horiz = std::max(max_pure_horiz, base);
+                            max_pure_horiz[local_lx] = std::max(max_pure_horiz[local_lx], base);
 
                         } else if (bot.is_pure) {
-                            // Only `top` carries deltas.
                             const int t_off = region.sheet_y_start - top.sheet_y_start;
                             const int ly_lo = std::max(0,      -t_off);
                             const int ly_hi = std::min(y_span, top.y_span - t_off);
 
-                            for (int ly = 0; ly < ly_lo; ++ly) col_best[ly] = std::max(col_best[ly], base);
-
-                            for (int ly = ly_lo; ly < ly_hi; ++ly) {
-                                const int32_t v = base - top.col_data[ly + t_off];
-                                col_best[ly] = std::max(col_best[ly], v);
-                            }
-
-                            for (int ly = ly_hi; ly < y_span; ++ly) col_best[ly] = std::max(col_best[ly], base);
+                            for (int ly = 0; ly < ly_lo; ++ly) c_best[ly] = std::max(c_best[ly], base);
+                            for (int ly = ly_lo; ly < ly_hi; ++ly) c_best[ly] = std::max(c_best[ly], base - top.col_data[ly + t_off]);
+                            for (int ly = ly_hi; ly < y_span; ++ly) c_best[ly] = std::max(c_best[ly], base);
 
                         } else if (top.is_pure) {
-                            // Only `bot` carries deltas.
                             const int b_off = (region.sheet_y_start + z) - bot.sheet_y_start;
                             const int ly_lo = std::max(0,      -b_off);
                             const int ly_hi = std::min(y_span, bot.y_span - b_off);
 
-                            for (int ly = 0; ly < ly_lo; ++ly) col_best[ly] = std::max(col_best[ly], base);
-
-                            for (int ly = ly_lo; ly < ly_hi; ++ly) {
-                                const int32_t v = base - bot.col_data[ly + b_off];
-                                col_best[ly] = std::max(col_best[ly], v);
-                            }
-
-                            for (int ly = ly_hi; ly < y_span; ++ly) col_best[ly] = std::max(col_best[ly], base);
+                            for (int ly = 0; ly < ly_lo; ++ly) c_best[ly] = std::max(c_best[ly], base);
+                            for (int ly = ly_lo; ly < ly_hi; ++ly) c_best[ly] = std::max(c_best[ly], base - bot.col_data[ly + b_off]);
+                            for (int ly = ly_hi; ly < y_span; ++ly) c_best[ly] = std::max(c_best[ly], base);
 
                         } else {
-                            // Both columns carry deltas.
                             const int t_off = region.sheet_y_start - top.sheet_y_start;
                             const int b_off = (region.sheet_y_start + z) - bot.sheet_y_start;
                             const int t_ly_lo = std::max(0,      -t_off);
@@ -479,43 +473,42 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
                             const int b_ly_lo = std::max(0,      -b_off);
                             const int b_ly_hi = std::min(y_span, bot.y_span - b_off);
 
-                            if (t_ly_lo == 0 && t_ly_hi == y_span &&
-                                b_ly_lo == 0 && b_ly_hi == y_span) {
-                                // Fast path: full coverage.
+                            if (t_ly_lo == 0 && t_ly_hi == y_span && b_ly_lo == 0 && b_ly_hi == y_span) {
                                 const uint16_t* t_data = top.col_data + t_off;
                                 const uint16_t* b_data = bot.col_data + b_off;
-                                int32_t* cb = col_best.data();
                                 for (int ly = 0; ly < y_span; ++ly) {
-                                    const int32_t v = base - t_data[ly] - b_data[ly];
-                                    cb[ly] = std::max(cb[ly], v);
+                                    c_best[ly] = std::max(c_best[ly], base - t_data[ly] - b_data[ly]);
                                 }
                             } else {
-                                // Slow path: converted to branchless masking
                                 for (int ly = 0; ly < y_span; ++ly) {
                                     const int32_t in_top = (ly >= t_ly_lo && ly < t_ly_hi);
                                     const int32_t in_bot = (ly >= b_ly_lo && ly < b_ly_hi);
-
                                     const int t_idx = in_top ? (ly + t_off) : 0;
                                     const int b_idx = in_bot ? (ly + b_off) : 0;
 
                                     int32_t v = base;
                                     v -= top.col_data[t_idx] * in_top;
                                     v -= bot.col_data[b_idx] * in_bot;
-
-                                    col_best[ly] = std::max(col_best[ly], v);
+                                    c_best[ly] = std::max(c_best[ly], v);
                                 }
                             }
                         }
                     }
+                }
 
-                    // --- PASS 4: Finalize and clamp deltas ---
-                    const int32_t max_pure = std::max(max_pure_vert, max_pure_horiz);
-                    for (int ly = 0; ly < y_span; ++ly) col_best[ly] = std::max(col_best[ly], max_pure);
-                    
+                // --- PASS 4: Finalize and clamp deltas ---
+                for (int lx = lx_start; lx < lx_end; ++lx) {
+                    const int local_lx = lx - lx_start;
+                    if (!col_is_impure[local_lx]) continue;
+
+                    const int32_t max_pure = std::max(max_pure_vert[local_lx], max_pure_horiz[local_lx]);
+                    int32_t* const c_best = local_best.data() + local_lx * y_span;
                     uint16_t* const delta_col = deltas_.data() + region.delta_offset + lx * y_span;
 
                     for (int ly = 0; ly < y_span; ++ly) {
-                        int32_t delta = pure_val - col_best[ly];
+                        c_best[ly] = std::max(c_best[ly], max_pure);
+                        int32_t delta = pure_val - c_best[ly];
+                        
                         if (delta > UINT16_MAX) {
                             overflow_seen = 1;
                             delta = UINT16_MAX;
@@ -524,6 +517,9 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
                     }
                 }
             }
+            // Explicit thread synchronization required after processing all regions 
+            // for the current (w,h) pair to ensure dependencies for subsequent DP steps are met.
+            #pragma omp barrier
         }
     }
 }
