@@ -1,5 +1,6 @@
 #include "gdcut/defect_table.hpp"
 #include <algorithm>
+#include <omp.h>
 
 namespace gdcut {
 
@@ -302,10 +303,14 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
                                int stride,
                                int min_item_width,
                                int min_item_height) {
-    std::vector<int32_t> col_best(sheet_height_ + 1);
-
     const int32_t* const prefix_base = defect_map.cumul_defective_cells_table();
     const int p_stride = defect_map.cumul_defective_cells_table_stride();
+    const bool enable_parallel = (omp_get_max_threads() > 1);
+    int overflow_seen = 0;
+
+#pragma omp parallel if(enable_parallel) reduction(|:overflow_seen)
+{
+    std::vector<int32_t> col_best(sheet_height_ + 1);
 
     for (int w = min_item_width; w <= sheet_width_; ++w) {
         for (int h = min_item_height; h <= sheet_height_; ++h) {
@@ -319,6 +324,7 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
                 const AffectedRegion& region = regions_[idx.regions_offset + r];
                 const int y_span = region.height;
 
+#pragma omp for schedule(static, 4)
                 for (int lx = 0; lx < region.width; ++lx) {
                     const int sx = region.sheet_x_start + lx;
 
@@ -340,15 +346,18 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
                     if (impure_count == 0) continue;
 
                     // --- PASS 2: Vertical cuts (dispatched on is_pure) ---
+                    int32_t max_pure_vert  = 0;
+                    int32_t max_pure_horiz = 0;
+                    
                     for (int z = 1; z < w; ++z) {
+
                         const ColumnView left  = resolve_column(z,     h, sx);
                         const ColumnView right = resolve_column(w - z, h, sx + z);
                         const int32_t base = left.pure_val + right.pure_val;
 
                         if (left.is_pure && right.is_pure) {
                             // Constant v across ly — pure max-update.
-                            for (int ly = 0; ly < y_span; ++ly)
-                                col_best[ly] = std::max(col_best[ly], base);
+                            max_pure_vert = std::max(max_pure_vert, base);
 
                         } else if (right.is_pure) {
                             // Only `left` carries deltas.
@@ -356,14 +365,14 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
                             const int ly_lo = std::max(0,      -l_off);
                             const int ly_hi = std::min(y_span, left.y_span - l_off);
 
-                            for (int ly = 0; ly < ly_lo; ++ly)
-                                col_best[ly] = std::max(col_best[ly], base);
+                            for (int ly = 0; ly < ly_lo; ++ly) col_best[ly] = std::max(col_best[ly], base);
+
                             for (int ly = ly_lo; ly < ly_hi; ++ly) {
                                 const int32_t v = base - left.col_data[ly + l_off];
                                 col_best[ly] = std::max(col_best[ly], v);
                             }
-                            for (int ly = ly_hi; ly < y_span; ++ly)
-                                col_best[ly] = std::max(col_best[ly], base);
+
+                            for (int ly = ly_hi; ly < y_span; ++ly) col_best[ly] = std::max(col_best[ly], base);
 
                         } else if (left.is_pure) {
                             // Only `right` carries deltas.
@@ -371,14 +380,14 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
                             const int ly_lo = std::max(0,      -r_off);
                             const int ly_hi = std::min(y_span, right.y_span - r_off);
 
-                            for (int ly = 0; ly < ly_lo; ++ly)
-                                col_best[ly] = std::max(col_best[ly], base);
+                            for (int ly = 0; ly < ly_lo; ++ly) col_best[ly] = std::max(col_best[ly], base);
+
                             for (int ly = ly_lo; ly < ly_hi; ++ly) {
                                 const int32_t v = base - right.col_data[ly + r_off];
                                 col_best[ly] = std::max(col_best[ly], v);
                             }
-                            for (int ly = ly_hi; ly < y_span; ++ly)
-                                col_best[ly] = std::max(col_best[ly], base);
+
+                            for (int ly = ly_hi; ly < y_span; ++ly) col_best[ly] = std::max(col_best[ly], base);
 
                         } else {
                             // Both columns carry deltas.
@@ -393,9 +402,9 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
                                 r_ly_lo == 0 && r_ly_hi == y_span) {
                                 
                                 // Fast path: both columns fully cover the bounding box.
-                                const uint16_t* __restrict__ l_data = left.col_data  + l_off;
-                                const uint16_t* __restrict__ r_data = right.col_data + r_off;
-                                int32_t* __restrict__ cb = col_best.data();
+                                const uint16_t* l_data = left.col_data  + l_off;
+                                const uint16_t* r_data = right.col_data + r_off;
+                                int32_t* cb = col_best.data();
                                 
                                 for (int ly = 0; ly < y_span; ++ly) {
                                     const int32_t v = base - l_data[ly] - r_data[ly];
@@ -422,14 +431,14 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
 
                     // --- PASS 3: Horizontal cuts (dispatched on is_pure) ---
                     for (int z = 1; z < h; ++z) {
+
                         const ColumnView top = resolve_column(w, z,     sx);
                         const ColumnView bot = resolve_column(w, h - z, sx);
                         const int32_t base = top.pure_val + bot.pure_val;
 
                         if (top.is_pure && bot.is_pure) {
                             // Constant v across ly — pure max-update.
-                            for (int ly = 0; ly < y_span; ++ly)
-                                col_best[ly] = std::max(col_best[ly], base);
+                            max_pure_horiz = std::max(max_pure_horiz, base);
 
                         } else if (bot.is_pure) {
                             // Only `top` carries deltas.
@@ -437,14 +446,14 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
                             const int ly_lo = std::max(0,      -t_off);
                             const int ly_hi = std::min(y_span, top.y_span - t_off);
 
-                            for (int ly = 0; ly < ly_lo; ++ly)
-                                col_best[ly] = std::max(col_best[ly], base);
+                            for (int ly = 0; ly < ly_lo; ++ly) col_best[ly] = std::max(col_best[ly], base);
+
                             for (int ly = ly_lo; ly < ly_hi; ++ly) {
                                 const int32_t v = base - top.col_data[ly + t_off];
                                 col_best[ly] = std::max(col_best[ly], v);
                             }
-                            for (int ly = ly_hi; ly < y_span; ++ly)
-                                col_best[ly] = std::max(col_best[ly], base);
+
+                            for (int ly = ly_hi; ly < y_span; ++ly) col_best[ly] = std::max(col_best[ly], base);
 
                         } else if (top.is_pure) {
                             // Only `bot` carries deltas.
@@ -452,14 +461,14 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
                             const int ly_lo = std::max(0,      -b_off);
                             const int ly_hi = std::min(y_span, bot.y_span - b_off);
 
-                            for (int ly = 0; ly < ly_lo; ++ly)
-                                col_best[ly] = std::max(col_best[ly], base);
+                            for (int ly = 0; ly < ly_lo; ++ly) col_best[ly] = std::max(col_best[ly], base);
+
                             for (int ly = ly_lo; ly < ly_hi; ++ly) {
                                 const int32_t v = base - bot.col_data[ly + b_off];
                                 col_best[ly] = std::max(col_best[ly], v);
                             }
-                            for (int ly = ly_hi; ly < y_span; ++ly)
-                                col_best[ly] = std::max(col_best[ly], base);
+
+                            for (int ly = ly_hi; ly < y_span; ++ly) col_best[ly] = std::max(col_best[ly], base);
 
                         } else {
                             // Both columns carry deltas.
@@ -473,9 +482,9 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
                             if (t_ly_lo == 0 && t_ly_hi == y_span &&
                                 b_ly_lo == 0 && b_ly_hi == y_span) {
                                 // Fast path: full coverage.
-                                const uint16_t* __restrict__ t_data = top.col_data + t_off;
-                                const uint16_t* __restrict__ b_data = bot.col_data + b_off;
-                                int32_t* __restrict__ cb = col_best.data();
+                                const uint16_t* t_data = top.col_data + t_off;
+                                const uint16_t* b_data = bot.col_data + b_off;
+                                int32_t* cb = col_best.data();
                                 for (int ly = 0; ly < y_span; ++ly) {
                                     const int32_t v = base - t_data[ly] - b_data[ly];
                                     cb[ly] = std::max(cb[ly], v);
@@ -500,13 +509,15 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
                     }
 
                     // --- PASS 4: Finalize and clamp deltas ---
-                    uint16_t* const delta_col =
-                        deltas_.data() + region.delta_offset + lx * y_span;
+                    const int32_t max_pure = std::max(max_pure_vert, max_pure_horiz);
+                    for (int ly = 0; ly < y_span; ++ly) col_best[ly] = std::max(col_best[ly], max_pure);
+                    
+                    uint16_t* const delta_col = deltas_.data() + region.delta_offset + lx * y_span;
 
                     for (int ly = 0; ly < y_span; ++ly) {
                         int32_t delta = pure_val - col_best[ly];
                         if (delta > UINT16_MAX) {
-                            overflow_ = true;
+                            overflow_seen = 1;
                             delta = UINT16_MAX;
                         }
                         delta_col[ly] = static_cast<uint16_t>(delta);
@@ -515,6 +526,8 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
             }
         }
     }
+}
+    overflow_ = overflow_ || (overflow_seen != 0);
 }
 
 const uint16_t* DefectTable::deltas_data()  const { return deltas_.data(); }

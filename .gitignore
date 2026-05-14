@@ -37,3 +37,4 @@ wavefront_profile.csv
 wavefront_profile.png
 generate_scalability_problems.py
 plot_wavefront.py
+solution.json

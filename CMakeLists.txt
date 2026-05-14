@@ -14,6 +14,8 @@ endif()
 add_compile_options(-Wall -Wextra -Wpedantic)
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     add_compile_options(-O3 -march=native)
+elseif(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+    add_compile_options(-O3 -march=native -g -fno-omit-frame-pointer)
 elseif(CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_options(-O0 -g)
 endif()
@@ -21,6 +23,8 @@ endif()
 include_directories(include)
 
 include_directories(vendor)
+
+find_package(OpenMP REQUIRED)
 
 add_library(gdcut_core
     src/core/cut_candidates.cpp
@@ -33,6 +37,7 @@ add_library(gdcut_core
     src/core/solver.cpp
     src/core/defect_table.cpp
 )
+target_link_libraries(gdcut_core PUBLIC OpenMP::OpenMP_CXX)
 
 add_executable(gdcut src/main.cpp)
 target_link_libraries(gdcut PRIVATE gdcut_core)
