@@ -4,10 +4,11 @@
 ![Language: C++17](https://img.shields.io/badge/language-C%2B%2B17-blue.svg)
 
 Freely inspired by:
+
 H. Zhang, S. Yao, Q. Liu, J. Leng, and L. Wei,
 "Exact approaches for the unconstrained two-dimensional cutting problem with defects,"
 *Computers & Operations Research*, vol. 160, 106407, 2023.
-https://doi.org/10.1016/j.cor.2023.106407
+[https://doi.org/10.1016/j.cor.2023.106407](https://doi.org/10.1016/j.cor.2023.106407)
 
 Exact solver for the unconstrained 2D guillotine cutting-stock problem with defects.
 Maximizes the total area of items placed on a rectangular sheet subject to guillotine
