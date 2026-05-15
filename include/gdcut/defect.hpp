@@ -15,6 +15,9 @@ namespace gdcut {
     struct Defect {
         int x, y, w, h;
 
+        /** @brief Constructs a defect with the given parameters. */
+        Defect(int x, int y, int w, int h) : x(x), y(y), w(w), h(h) {}
+
         /** @brief Exclusive right edge of the defect: x + w. */
         int x_end() const { return x + w; }
 
