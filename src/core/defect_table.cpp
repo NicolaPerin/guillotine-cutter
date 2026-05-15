@@ -96,19 +96,18 @@ int DefectTable::compute_overlap_intervals(const Problem& problem,
     int n_scratch = 0;
 
     for (const auto& defect : problem.defects()) {
-        int x_lo = defect.x - w + 1;
-        int x_hi = defect.x_end() - 1;
+        int rx_lo = defect.x + 1;           // x_lo + w
+        int rx_hi = defect.x_end() - 1 + w; // x_hi + w
         int y_lo = defect.y - h + 1;
         int y_hi = defect.y_end() - 1;
 
         // clamp to valid sheet positions
-        x_lo = std::max(x_lo, 0);
-        x_hi = std::min(x_hi, sheet_width_  - w);
+        rx_lo = std::max(rx_lo, w);          // sx >= 0 → rx >= w
+        rx_hi = std::min(rx_hi, sheet_width_); // sx <= sheet_width_-w → rx <= sheet_width_
         y_lo = std::max(y_lo, 0);
         y_hi = std::min(y_hi, sheet_height_ - h);
 
-        if (x_lo <= x_hi && y_lo <= y_hi)
-            scratch[n_scratch++] = {x_lo, x_hi, y_lo, y_hi};
+        if (rx_lo <= rx_hi && y_lo <= y_hi) scratch[n_scratch++] = {rx_lo, rx_hi, y_lo, y_hi};
     }
 
     return n_scratch;
@@ -254,6 +253,7 @@ int32_t DefectTable::lookup(int w, int h, int sx, int sy) const {
     const int32_t pure_val = pure_table_.value(w, h);
 
     if (!has_affected_[wh_idx]) return pure_val;
+    const int rx = sx + w;  // convert to right edge
 
     const AffectedRegionIndex& idx = region_index_[wh_idx];
 
@@ -262,17 +262,16 @@ int32_t DefectTable::lookup(int w, int h, int sx, int sy) const {
     while (lo <= hi) {
         int mid = lo + (hi - lo) / 2;
         const AffectedRegion& r = regions_[idx.regions_offset + mid];
-        if      (sx < r.sheet_x_start)                 hi = mid - 1;
-        else if (sx > r.sheet_x_start + r.width - 1)   lo = mid + 1;
+        if      (rx < r.sheet_x_start)                 hi = mid - 1;
+        else if (rx > r.sheet_x_start + r.width - 1)   lo = mid + 1;
         else {
-            int lx = sx - r.sheet_x_start;
+            int lx = rx - r.sheet_x_start;  // invariant: same as sx - original_x_start
             int ly = sy - r.sheet_y_start;
-            // sy outside region's y range — position is pure
             if (ly < 0 || ly >= r.height) return pure_val;
             return pure_val - deltas_[r.delta_offset + lx * r.height + ly];
         }
     }
-    // sx not in any region — position is pure
+    // rx not in any region — position is pure
     return pure_val;
 }
 
@@ -345,7 +344,7 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
                 // --- PASS 1: Defect classification + local_best seeding ---
                 for (int lx = lx_start; lx < lx_end; ++lx) {
                     const int local_lx = lx - lx_start;
-                    const int sx = region.sheet_x_start + lx;
+                    const int sx = region.sheet_x_start + lx - w; // convert back to left edge
                     
                     max_pure_vert[local_lx]  = 0;
                     max_pure_horiz[local_lx] = 0;
@@ -374,7 +373,7 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
                         const int local_lx = lx - lx_start;
                         if (!col_is_impure[local_lx]) continue;
 
-                        const int sx = region.sheet_x_start + lx;
+                        const int sx = region.sheet_x_start + lx - w; // convert back to left edge
                         const ColumnView left  = resolve_column(z,     h, sx);
                         const ColumnView right = resolve_column(w - z, h, sx + z);
                         const int32_t base = left.pure_val + right.pure_val;
@@ -438,7 +437,7 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
                         const int local_lx = lx - lx_start;
                         if (!col_is_impure[local_lx]) continue;
 
-                        const int sx = region.sheet_x_start + lx;
+                        const int sx = region.sheet_x_start + lx - w; // convert back to left edge
                         const ColumnView top = resolve_column(w, z,     sx);
                         const ColumnView bot = resolve_column(w, h - z, sx);
                         const int32_t base = top.pure_val + bot.pure_val;
