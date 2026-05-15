@@ -77,29 +77,31 @@ namespace gdcut {
             };
 
             inline ColumnView resolve_column(int w, int h, int sx) const {
-                const int    stride   = sheet_height_ + 1;
-                const int    wh_idx   = w * stride + h;
+                const int     stride   = sheet_height_ + 1;
+                const int     wh_idx   = w * stride + h;
                 const int32_t pure_val = pure_table_.value(w, h);
 
                 if (!has_affected_[wh_idx])
                     return {pure_val, true, 0, 0, nullptr};
 
                 const AffectedRegionIndex& idx = region_index_[wh_idx];
+                const int rx = sx + w;  // convert to right edge
 
                 int lo = 0, hi = idx.region_count - 1;
                 while (lo <= hi) {
                     int mid = lo + (hi - lo) / 2;
                     const AffectedRegion& r = regions_[idx.regions_offset + mid];
-                    if      (sx < r.sheet_x_start)                hi = mid - 1;
-                    else if (sx > r.sheet_x_start + r.width - 1)  lo = mid + 1;
+                    if      (rx < r.sheet_x_start)                hi = mid - 1;
+                    else if (rx > r.sheet_x_start + r.width - 1)  lo = mid + 1;
                     else {
-                        int lx = sx - r.sheet_x_start;
+                        int lx = rx - r.sheet_x_start;  // invariant: same value as before
                         return {pure_val, false, r.height, r.sheet_y_start,
                                 &deltas_[r.delta_offset + lx * r.height]};
                     }
                 }
                 return {pure_val, true, 0, 0, nullptr};
             }
+
             int32_t    column_get(const ColumnView& cv, int sy) const;
 
             /** @brief Computes affected position intervals for a single (w,h) pair. */
