@@ -312,12 +312,22 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
     const int thread_id = omp_get_thread_num();
     const int num_threads = omp_get_num_threads();
 
-    // Thread-local 2D workspace to accumulate region maximums.
-    // Sized to the maximum possible region dimensions to prevent reallocation.
-    std::vector<int32_t> local_best((sheet_width_ + 1) * (sheet_height_ + 1));
-    std::vector<uint8_t> col_is_impure(sheet_width_ + 1);
-    std::vector<int32_t> max_pure_vert(sheet_width_ + 1);
-    std::vector<int32_t> max_pure_horiz(sheet_width_ + 1);
+    // Declare static thread_local so they persist across parallel region 
+    // entries and across multiple calls to fill_deltas. 
+    // They are allocated once and never needlessly re-zeroed.
+    thread_local std::vector<int32_t> local_best;
+    thread_local std::vector<uint8_t> col_is_impure;
+    thread_local std::vector<int32_t> max_pure_vert;
+    thread_local std::vector<int32_t> max_pure_horiz;
+
+    const size_t req_area  = static_cast<size_t>(sheet_width_ + 1) * (sheet_height_ + 1);
+    const size_t req_width = static_cast<size_t>(sheet_width_ + 1);
+
+    // Grow if needed, but never shrink. Skips initialization on subsequent calls.
+    if (local_best.size() < req_area)      local_best.resize(req_area);
+    if (col_is_impure.size() < req_width)  col_is_impure.resize(req_width);
+    if (max_pure_vert.size() < req_width)  max_pure_vert.resize(req_width);
+    if (max_pure_horiz.size() < req_width) max_pure_horiz.resize(req_width);
 
     for (int w = min_item_width; w <= sheet_width_; ++w) {
         for (int h = min_item_height; h <= sheet_height_; ++h) {
@@ -332,19 +342,16 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
                 const int y_span = region.height;
                 const int r_width = region.width;
 
-                // Manual static scheduling: divide the region's width among threads.
-                // This replaces '#pragma omp for', eliminating synchronization overhead
-                // and allowing safe, contiguous thread-local accumulation.
                 const int chunk_size = (r_width + num_threads - 1) / num_threads;
                 const int lx_start   = std::min(thread_id * chunk_size, r_width);
                 const int lx_end     = std::min(lx_start + chunk_size, r_width);
 
-                if (lx_start >= lx_end) continue; // Thread has no assigned work for this region
+                if (lx_start >= lx_end) continue; 
 
                 // --- PASS 1: Defect classification + local_best seeding ---
                 for (int lx = lx_start; lx < lx_end; ++lx) {
                     const int local_lx = lx - lx_start;
-                    const int sx = region.sheet_x_start + lx - w; // convert back to left edge
+                    const int sx = region.sheet_x_start + lx - w; 
                     
                     max_pure_vert[local_lx]  = 0;
                     max_pure_horiz[local_lx] = 0;
@@ -365,15 +372,13 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
                     col_is_impure[local_lx] = (impure_count > 0) ? 1 : 0;
                 }
 
-                // --- PASS 2: Vertical cuts (z is the OUTER loop) ---
-                // Iterating z externally allows the CPU hardware prefetcher to load
-                // contiguous column segments linearly as lx increments internally.
+                // --- PASS 2: Vertical cuts ---
                 for (int z = 1; z < w; ++z) {
                     for (int lx = lx_start; lx < lx_end; ++lx) {
                         const int local_lx = lx - lx_start;
                         if (!col_is_impure[local_lx]) continue;
 
-                        const int sx = region.sheet_x_start + lx - w; // convert back to left edge
+                        const int sx = region.sheet_x_start + lx - w; 
                         const ColumnView left  = resolve_column(z,     h, sx);
                         const ColumnView right = resolve_column(w - z, h, sx + z);
                         const int32_t base = left.pure_val + right.pure_val;
@@ -431,13 +436,13 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
                     }
                 }
 
-                // --- PASS 3: Horizontal cuts (z is the OUTER loop) ---
+                // --- PASS 3: Horizontal cuts ---
                 for (int z = 1; z < h; ++z) {
                     for (int lx = lx_start; lx < lx_end; ++lx) {
                         const int local_lx = lx - lx_start;
                         if (!col_is_impure[local_lx]) continue;
 
-                        const int sx = region.sheet_x_start + lx - w; // convert back to left edge
+                        const int sx = region.sheet_x_start + lx - w; 
                         const ColumnView top = resolve_column(w, z,     sx);
                         const ColumnView bot = resolve_column(w, h - z, sx);
                         const int32_t base = top.pure_val + bot.pure_val;
@@ -516,8 +521,6 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
                     }
                 }
             }
-            // Explicit thread synchronization required after processing all regions 
-            // for the current (w,h) pair to ensure dependencies for subsequent DP steps are met.
             #pragma omp barrier
         }
     }
