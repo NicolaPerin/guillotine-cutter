@@ -31,11 +31,12 @@ add_library(gdcut_core
     src/core/cut_node.cpp
     src/core/cut_node_json.cpp
     src/core/defect.cpp
-    src/core/patterns.cpp
-    src/core/pure_table.cpp
-    src/core/problem.cpp
-    src/core/solver.cpp
     src/core/defect_table.cpp
+    src/core/patterns.cpp
+    src/core/problem.cpp
+    src/core/pure_table.cpp
+    src/core/solution_writer.cpp
+    src/core/solver.cpp
 )
 target_link_libraries(gdcut_core PUBLIC OpenMP::OpenMP_CXX)
 
