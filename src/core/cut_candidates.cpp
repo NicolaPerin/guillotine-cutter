@@ -163,7 +163,7 @@ namespace gdcut {
         for (int reversed_position : reversed_normal_positions) {
             int bottom_space    = h - reversed_position;
             int best_bottom_cut = max_reachable_extended(
-                patterns_y_, defect_map_, x, y, bottom_space, w, false);
+                patterns_y_, defect_map_, y, x, bottom_space, w, false);
             if (best_bottom_cut > 0 && best_bottom_cut < h)
                 extended_raster_points.insert(best_bottom_cut);
         }

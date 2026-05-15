@@ -1,5 +1,4 @@
 cmake_minimum_required(VERSION 3.20)
-cmake_minimum_required(VERSION 3.20)
 project(gdcut CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -35,6 +34,7 @@ add_library(gdcut_core
     src/core/patterns.cpp
     src/core/problem.cpp
     src/core/pure_table.cpp
+    src/core/recursive_solver.cpp
     src/core/solution_writer.cpp
     src/core/solver.cpp
 )
