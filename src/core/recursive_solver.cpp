@@ -45,16 +45,37 @@ int32_t RecursiveSolver::solve_cont(int x, int y, int w, int h) {
 
     const std::vector<int> x_cands = cuts_.x_cuts(x, y, w, h);
     for (int z : x_cands) {
-        int32_t v = solve_cont(x,     y, z,     h)
-                  + solve_cont(x + z, y, w - z, h);
-        if (v > best) { best = v; best_dec = Decision::CutX; best_param = z; }
+        
+        // O(1) Pre-check: If the absolute maximum of this specific cut combination 
+        // cannot beat our current best, do not evaluate it.
+        if (pure_table_.value(z, h) + pure_table_.value(w - z, h) <= best) continue;
+        int32_t v1 = solve_cont(x, y, z, h);
+        // O(1) Post-v1 check
+        if (v1 + pure_table_.value(w - z, h) <= best) continue;
+
+        int32_t v2 = solve_cont(x + z, y, w - z, h);
+        int32_t v = v1 + v2;
+        if (v > best) { 
+            best = v; 
+            best_dec = Decision::CutX; 
+            best_param = z; 
+        }
     }
 
     const std::vector<int> y_cands = cuts_.y_cuts(x, y, w, h);
     for (int z : y_cands) {
-        int32_t v = solve_cont(x, y,     w, z)
-                  + solve_cont(x, y + z, w, h - z);
-        if (v > best) { best = v; best_dec = Decision::CutY; best_param = z; }
+        
+        if (pure_table_.value(w, z) + pure_table_.value(w, h - z) <= best) continue;
+        int32_t v1 = solve_cont(x, y, w, z);
+        if (v1 + pure_table_.value(w, h - z) <= best) continue;
+
+        int32_t v2 = solve_cont(x, y + z, w, h - z);
+        int32_t v = v1 + v2;
+        if (v > best) { 
+            best = v; 
+            best_dec = Decision::CutY; 
+            best_param = z; 
+        }
     }
 
     cont_memo_[key] = {best, best_dec, best_param};
