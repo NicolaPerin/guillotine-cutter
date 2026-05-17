@@ -33,11 +33,8 @@ int32_t RecursiveSolver::solve() {
 
 int32_t RecursiveSolver::solve_cont(int x, int y, int w, int h) {
     if (w <= 0 || h <= 0) return 0;
-
-    // pure sub-sheet: delegate directly — no memoisation needed
     if (defect_map_.is_defect_free_rectangle(x, y, w, h))
         return pure_table_.value(w, h);
-
     if (w < min_w_ || h < min_h_) return 0;
 
     const uint64_t key = cont_key(x, y, w, h);
@@ -48,13 +45,15 @@ int32_t RecursiveSolver::solve_cont(int x, int y, int w, int h) {
     Decision best_dec = Decision::Defect;
     int32_t  best_param = 0;
 
-    for (int z : cuts_.x_cuts(x, y, w, h)) {
+    const std::vector<int> x_cands = cuts_.x_cuts(x, y, w, h);
+    for (int z : x_cands) {
         int32_t v = solve_cont(x,     y, z,     h)
                   + solve_cont(x + z, y, w - z, h);
         if (v > best) { best = v; best_dec = Decision::CutX; best_param = z; }
     }
 
-    for (int z : cuts_.y_cuts(x, y, w, h)) {
+    const std::vector<int> y_cands = cuts_.y_cuts(x, y, w, h);
+    for (int z : y_cands) {
         int32_t v = solve_cont(x, y,     w, z)
                   + solve_cont(x, y + z, w, h - z);
         if (v > best) { best = v; best_dec = Decision::CutY; best_param = z; }
