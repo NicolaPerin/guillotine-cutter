@@ -32,10 +32,8 @@ int32_t RecursiveSolver::solve() {
 }
 
 int32_t RecursiveSolver::solve_cont(int x, int y, int w, int h) {
-    if (w <= 0 || h <= 0) return 0;
-    if (defect_map_.is_defect_free_rectangle(x, y, w, h))
-        return pure_table_.value(w, h);
-    if (w < min_w_ || h < min_h_) return 0;
+    if (w < min_w_ || h < min_h_) return 0; // Catches both <= 0 and smaller than minimum item
+    if (defect_map_.is_defect_free_rectangle(x, y, w, h)) return pure_table_.value(w, h);
 
     const uint64_t key = cont_key(x, y, w, h);
     auto it = cont_memo_.find(key);
