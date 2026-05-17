@@ -1,0 +1,21 @@
+{
+  "problem": {
+    "sheet_size": [200, 200],
+    "items": [
+      {"width": 38, "height": 42},
+      {"width": 45, "height": 35},
+      {"width": 52, "height": 48},
+      {"width": 60, "height": 40},
+      {"width": 35, "height": 55},
+      {"width": 48, "height": 52},
+      {"width": 40, "height": 60},
+      {"width": 55, "height": 45},
+      {"width": 42, "height": 50},
+      {"width": 50, "height": 38}
+    ],
+    "defects": [
+      {"x": 30,  "y": 25,  "width": 18, "height": 22},
+      {"x": 130, "y": 120, "width": 20, "height": 16}
+    ]
+  }
+}
