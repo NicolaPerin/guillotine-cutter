@@ -1,5 +1,5 @@
 gdcut
-Copyright (c) 2025 Nicola Perin
+Copyright (c) 2026 Nicola Perin
 Licensed under the MIT License.
 
 -------------------------------------------------------------------------------
@@ -67,4 +67,10 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 nlohmann/json (https://github.com/nlohmann/json)
 Copyright (c) 2013-2026 Niels Lohmann.
+Licensed under the MIT License.
+
+-------------------------------------------------------------------------------
+
+cpp-httplib (https://github.com/yhirose/cpp-httplib)
+Copyright (c) 2012 Yuji Hirose.
 Licensed under the MIT License.
