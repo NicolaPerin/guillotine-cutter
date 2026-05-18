@@ -2,6 +2,7 @@
 #include "gdcut/solver.hpp"
 #include "gdcut/solution_writer.hpp"
 #include "CLI11.hpp"
+#include "gdcut/server.hpp"
 #include <omp.h>
 #include <chrono>
 #include <iostream>
@@ -11,7 +12,7 @@
 using namespace gdcut;
 
 int main(int argc, char* argv[]) {
-    CLI::App app{"gdcut — guillotine cutting solver"};
+    CLI::App app{"gdcut - guillotine cutting solver"};
     app.require_subcommand(1);
 
     auto* solve_cmd = app.add_subcommand("solve", "Solve a cutting problem from JSON");
@@ -33,7 +34,18 @@ int main(int argc, char* argv[]) {
         "Raster density threshold for auto dispatch (default: "
         + std::to_string(Solver::SPARSE_THRESHOLD) + ")");
 
+    auto* serve_cmd = app.add_subcommand("serve", "Start the local web interface");
+    int port = 8080;
+    std::string frontend_dir = "src/frontend";
+    serve_cmd->add_option("-p,--port", port, "Port to listen on (default: 8080)");
+    serve_cmd->add_option("--frontend", frontend_dir, "Path to frontend directory (default: src/frontend)");
+
     CLI11_PARSE(app, argc, argv);
+
+    if (serve_cmd->parsed()) {
+        gdcut::run_server(port, frontend_dir, ".");
+        return 0;
+    }
 
     try {
         if (threads > 0) {

@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>gdcut</title>
+  <style>
+    /* ── reset ── */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* ── page layout ── */
+    body {
+      font-family: Georgia, "Times New Roman", serif;
+      background: #c8a85a;
+      color: #2c1a0e;
+      height: 100vh;
+      overflow: hidden;
+      padding: 1rem 2rem;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── page title ── */
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: #2c1a0e;
+      margin-bottom: 1rem;
+      letter-spacing: 0.02em;
+      text-align: center;
+      flex-shrink: 0;
+    }
+
+    /* ── panel section headings ── */
+    h2 {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: #5c3a1e;
+      margin-bottom: 1rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    /* ── two-column grid: left editor | right visualizer ── */
+    .layout {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: 1.5rem;
+      max-width: 1300px;
+      margin: 0 auto;
+      flex: 1;
+      min-height: 0;
+      width: 100%;
+    }
+
+    /* ── left column: scrollable editor panels ── */
+    .left-col {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      overflow-y: auto;
+      min-height: 0;
+      padding-right: 0.4rem;
+      padding-bottom: 0.5rem;
+    }
+
+    /* ── card panel (sheet / items / defects) ── */
+    .panel {
+      background: #f5e6c8;
+      border: 1px solid #a07840;
+      border-radius: 4px;
+      padding: 1rem 1.25rem;
+      flex-shrink: 0;
+    }
+
+    /* ── form field wrapper ── */
+    .field { margin-bottom: 0.75rem; }
+
+    /* ── field labels ── */
+    label {
+      display: block;
+      font-size: 0.72rem;
+      color: #7a5230;
+      margin-bottom: 0.25rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    /* ── number inputs ── */
+    input[type="number"] {
+    width: 100%;
+    background: #fdf5e6;
+    border: 1px solid #a07840;
+    border-radius: 2px;
+    color: #000000;
+    padding: 0.3rem 0.5rem;
+    font-size: 1.0rem;
+    font-family: "Courier New", Courier, monospace;
+    }
+    input[type="number"]:focus { outline: none; border-color: #5c3a1e; }
+
+    /* ── grid helpers for input rows ── */
+    .row   { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    .row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.5rem; }
+    .row-4 { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 0.4rem; }
+
+    /* ── items / defects tables ── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+      margin-bottom: 0.6rem;
+    }
+    th {
+      text-align: left;
+      color: #7a5230;
+      font-weight: 600;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 0.25rem 0.3rem;
+      border-bottom: 1px solid #a07840;
+    }
+    td { padding: 0.25rem 0.3rem; border-bottom: 1px solid #e0c990; }
+    td input[type="number"] { padding: 0.15rem 0.3rem; }
+
+    /* ── remove row button (✕) ── */
+    .btn-remove {
+      background: none; border: none;
+      color: #8b2e0e; cursor: pointer;
+      font-size: 0.9rem; padding: 0 0.2rem;
+    }
+    .btn-remove:hover { color: #c0392b; }
+
+    /* ── primary button (dark brown) ── */
+    button {
+      background: #5c3a1e; border: none;
+      border-radius: 3px; color: #f5e6c8;
+      cursor: pointer; font-size: 0.82rem;
+      font-weight: 600; padding: 0.4rem 0.9rem;
+      letter-spacing: 0.03em;
+      font-family: Georgia, "Times New Roman", serif;
+    }
+    button:hover { background: #7a5230; }
+
+    /* ── secondary button (ochre) ── */
+    button.secondary { background: #d4a95a; color: #2c1a0e; }
+    button.secondary:hover { background: #c8a85a; }
+
+    /* ── button rows ── */
+    .btn-row { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
+
+    /* ── status message below save/load buttons ── */
+    #status {
+      font-size: 0.82rem;
+      min-height: 1.1rem;
+      color: #7a5230;
+      flex-shrink: 0;
+    }
+    #status.ok  { color: #2d6a2d; }
+    #status.err { color: #8b2e0e; }
+
+    /* ── right panel: visualizer container ── */
+    #canvas-panel {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      background: #f5e6c8;
+      border: 1px solid #a07840;
+      border-radius: 4px;
+      padding: 1rem 1.25rem;
+    }
+    #canvas-panel h2 { flex-shrink: 0; }
+
+    /* ── zoom/pan hint text ── */
+    #canvas-hint {
+      font-size: 1.0rem;
+      color: #a07840;
+      text-align: right;
+      flex-shrink: 0;
+      margin-bottom: 0.3rem;
+    }
+
+    /* ── canvas drawing area ── */
+    #canvas-area {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+      background: #fdf5e6;
+      border: 1px solid #a07840;
+      border-radius: 3px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #a07840;
+      font-size: 0.85rem;
+      cursor: grab;
+      position: relative;
+    }
+    #canvas-area:active { cursor: grabbing; }
+    #canvas-area canvas { display: block; position: absolute; top: 0; left: 0; }
+  </style>
+</head>
+<body>
+
+<!-- ── page title ── -->
+<h1>gdcut — guillotine cutting solver</h1>
+
+<div class="layout">
+
+  <!-- ══════════════════════════════════════════
+       LEFT COLUMN — problem editor
+  ══════════════════════════════════════════ -->
+  <div class="left-col">
+
+    <!-- sheet dimensions -->
+    <div class="panel">
+      <h2>Sheet</h2>
+      <div class="row">
+        <div class="field">
+          <label>Width</label>
+          <input type="number" id="sheet-w" value="100" min="1" oninput="renderSheet()">
+        </div>
+        <div class="field">
+          <label>Height</label>
+          <input type="number" id="sheet-h" value="100" min="1" oninput="renderSheet()">
+        </div>
+      </div>
+    </div>
+
+    <!-- items table + add row -->
+    <div class="panel">
+      <h2>Items</h2>
+      <table>
+        <thead><tr><th>Width</th><th>Height</th><th>Profit</th><th></th></tr></thead>
+        <tbody id="items-body"></tbody>
+      </table>
+      <!-- new item input row -->
+      <div class="row-3">
+        <input type="number" id="new-w" placeholder="w" min="1">
+        <input type="number" id="new-h" placeholder="h" min="1">
+        <input type="number" id="new-p" placeholder="profit" min="1">
+      </div>
+      <div class="btn-row">
+        <button class="secondary" onclick="addItem()">+ Add item</button>
+      </div>
+    </div>
+
+    <!-- defects table + add row -->
+    <div class="panel">
+      <h2>Defects</h2>
+      <table>
+        <thead><tr><th>X</th><th>Y</th><th>W</th><th>H</th><th></th></tr></thead>
+        <tbody id="defects-body"></tbody>
+      </table>
+      <!-- new defect input row -->
+      <div class="row-4">
+        <input type="number" id="new-dx" placeholder="x" min="0">
+        <input type="number" id="new-dy" placeholder="y" min="0">
+        <input type="number" id="new-dw" placeholder="w" min="1">
+        <input type="number" id="new-dh" placeholder="h" min="1">
+      </div>
+      <div class="btn-row">
+        <button class="secondary" onclick="addDefect()">+ Add defect</button>
+      </div>
+    </div>
+
+    <!-- save / load buttons -->
+    <div class="btn-row">
+      <button onclick="saveProblem()">Save problem</button>
+      <button class="secondary" onclick="loadProblem()">Load problem</button>
+    </div>
+    <!-- hidden file input triggered by Load problem -->
+    <input type="file" id="file-input" accept=".json" style="display:none"
+           onchange="onFileSelected(event)">
+
+    <!-- status message -->
+    <div id="status"></div>
+
+  </div><!-- end left-col -->
+
+  <!-- ══════════════════════════════════════════
+       RIGHT COLUMN — sheet visualizer
+  ══════════════════════════════════════════ -->
+  <div id="canvas-panel">
+    <!-- title updates to "Visualizing filename.json" after load/save -->
+    <h2 id="canvas-title">No problem loaded</h2>
+    <!-- keyboard/mouse controls hint -->
+    <div id="canvas-hint">scroll to zoom &nbsp;·&nbsp; drag to pan &nbsp;·&nbsp; Ctrl +/- &nbsp;·&nbsp; WASD &nbsp;·&nbsp; R to reset</div>
+    <!-- canvas is injected here by renderSheet() -->
+    <div id="canvas-area">
+      <span id="canvas-placeholder">Load or save a problem to visualize the sheet.</span>
+    </div>
+  </div>
+
+</div><!-- end layout -->
+
+<script>
+// ══════════════════════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════════════════════
+let items   = [];
+let defects = [];
+let currentFilename = null;
+
+// view transform state (zoom + pan)
+let viewZoom = 1.0;
+let viewPanX = 0;
+let viewPanY = 0;
+let isPanning = false;
+let panStartX = 0, panStartY = 0;
+let panStartViewX = 0, panStartViewY = 0;
+let sheetW = 100, sheetH = 100;
+
+// pixels reserved around the sheet for axis labels
+const MARGIN = 48;
+
+// ══════════════════════════════════════════════════════════════════
+// ITEMS
+// ══════════════════════════════════════════════════════════════════
+function renderItems() {
+  const tbody = document.getElementById('items-body');
+  tbody.innerHTML = '';
+  items.forEach((item, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input type="number" value="${item.width}"  min="1"
+          oninput="items[${i}].width=+this.value"></td>
+      <td><input type="number" value="${item.height}" min="1"
+          oninput="items[${i}].height=+this.value"></td>
+      <td><input type="number" value="${item.profit}" min="1"
+          oninput="items[${i}].profit=+this.value"></td>
+      <td><button class="btn-remove" onclick="removeItem(${i})">✕</button></td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function addItem() {
+  const w = +document.getElementById('new-w').value;
+  const h = +document.getElementById('new-h').value;
+  const p = +document.getElementById('new-p').value || w * h;
+  if (!w || !h) return setStatus('Item width and height are required.', true);
+  items.push({ width: w, height: h, profit: p });
+  ['new-w','new-h','new-p'].forEach(id => document.getElementById(id).value = '');
+  renderItems();
+}
+
+function removeItem(i) { items.splice(i, 1); renderItems(); }
+
+// ══════════════════════════════════════════════════════════════════
+// DEFECTS
+// ══════════════════════════════════════════════════════════════════
+function renderDefects() {
+  const tbody = document.getElementById('defects-body');
+  tbody.innerHTML = '';
+  defects.forEach((d, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input type="number" value="${d.x}"      min="0"
+          oninput="defects[${i}].x=+this.value; renderSheet()"></td>
+      <td><input type="number" value="${d.y}"      min="0"
+          oninput="defects[${i}].y=+this.value; renderSheet()"></td>
+      <td><input type="number" value="${d.width}"  min="1"
+          oninput="defects[${i}].width=+this.value; renderSheet()"></td>
+      <td><input type="number" value="${d.height}" min="1"
+          oninput="defects[${i}].height=+this.value; renderSheet()"></td>
+      <td><button class="btn-remove" onclick="removeDefect(${i})">✕</button></td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function addDefect() {
+  const x = +document.getElementById('new-dx').value || 0;
+  const y = +document.getElementById('new-dy').value || 0;
+  const w = +document.getElementById('new-dw').value;
+  const h = +document.getElementById('new-dh').value;
+  if (!w || !h) return setStatus('Defect width and height are required.', true);
+  defects.push({ x, y, width: w, height: h });
+  ['new-dx','new-dy','new-dw','new-dh'].forEach(id =>
+    document.getElementById(id).value = '');
+  renderDefects();
+  renderSheet();
+}
+
+function removeDefect(i) { defects.splice(i, 1); renderDefects(); renderSheet(); }
+
+// ══════════════════════════════════════════════════════════════════
+// STATUS MESSAGE
+// ══════════════════════════════════════════════════════════════════
+function setStatus(msg, isError) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = isError ? 'err' : 'ok';
+}
+
+// ══════════════════════════════════════════════════════════════════
+// BUILD PROBLEM JSON
+// ══════════════════════════════════════════════════════════════════
+function buildProblem() {
+  const w = +document.getElementById('sheet-w').value;
+  const h = +document.getElementById('sheet-h').value;
+  if (!w || !h) { setStatus('Sheet dimensions are required.', true); return null; }
+  return { problem: { sheet_size: [w, h], items, defects } };
+}
+
+// ══════════════════════════════════════════════════════════════════
+// SAVE — browser download dialog
+// ══════════════════════════════════════════════════════════════════
+function saveProblem() {
+  const prob = buildProblem();
+  if (!prob) return;
+  const blob = new Blob([JSON.stringify(prob, null, 2)], {type: 'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = currentFilename || 'problem.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  currentFilename = a.download;
+  setStatus('Saved ' + currentFilename, false);
+  updateTitle();
+  renderSheet();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// LOAD — file browser dialog
+// ══════════════════════════════════════════════════════════════════
+function loadProblem() {
+  document.getElementById('file-input').click();
+}
+
+function onFileSelected(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  currentFilename = file.name;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      populateFromJSON(JSON.parse(e.target.result));
+      setStatus('Loaded ' + currentFilename, false);
+      updateTitle();
+      resetView();
+      renderSheet();
+    } catch { setStatus('Invalid JSON file.', true); }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+function populateFromJSON(json) {
+  const prob = json.problem || json;
+  const [w, h] = prob.sheet_size || [100, 100];
+  document.getElementById('sheet-w').value = w;
+  document.getElementById('sheet-h').value = h;
+  items   = (prob.items   || []).map(it => ({
+    width: it.width, height: it.height,
+    profit: it.profit || it.width * it.height
+  }));
+  defects = (prob.defects || []).map(d => ({
+    x: d.x, y: d.y, width: d.width, height: d.height
+  }));
+  renderItems();
+  renderDefects();
+}
+
+// ── update visualizer title ──
+function updateTitle() {
+  document.getElementById('canvas-title').textContent =
+    currentFilename ? 'Visualizing ' + currentFilename : 'No problem loaded';
+}
+
+// ══════════════════════════════════════════════════════════════════
+// VIEW STATE — zoom + pan
+// ══════════════════════════════════════════════════════════════════
+function resetView() {
+  viewZoom = 1.0;
+  viewPanX = 0;
+  viewPanY = 0;
+}
+
+// keep pan within sensible bounds
+function clampPan(area, baseScale) {
+  const cw = area.clientWidth;
+  const ch = area.clientHeight;
+  const sw = sheetW * baseScale * viewZoom;
+  const sh = sheetH * baseScale * viewZoom;
+  const minPanX = Math.min(0, cw - MARGIN - sw - MARGIN);
+  const minPanY = Math.min(0, ch - MARGIN - sh - MARGIN);
+  viewPanX = Math.max(minPanX, Math.min(0, viewPanX));
+  viewPanY = Math.max(minPanY, Math.min(0, viewPanY));
+}
+
+// ══════════════════════════════════════════════════════════════════
+// SHEET RENDERER — draws onto <canvas> inside #canvas-area
+// ══════════════════════════════════════════════════════════════════
+function renderSheet() {
+  sheetW = +document.getElementById('sheet-w').value;
+  sheetH = +document.getElementById('sheet-h').value;
+  if (!sheetW || !sheetH) return;
+
+  const area = document.getElementById('canvas-area');
+  const placeholder = document.getElementById('canvas-placeholder');
+  if (placeholder) placeholder.style.display = 'none';
+
+  const areaW = area.clientWidth  || 600;
+  const areaH = area.clientHeight || 500;
+
+  // base scale: fit sheet to available space regardless of problem size
+  const drawW = areaW - MARGIN * 2;
+  const drawH = areaH - MARGIN * 2;
+  const baseScale = Math.min(drawW / sheetW, drawH / sheetH);
+
+  const scale = baseScale * viewZoom;
+  const sw = Math.round(sheetW * scale);  // sheet width in pixels
+  const sh = Math.round(sheetH * scale);  // sheet height in pixels
+
+  // reuse or create canvas element
+  let canvas = area.querySelector('canvas');
+  if (!canvas) {
+    canvas = document.createElement('canvas');
+    area.appendChild(canvas);
+  }
+  canvas.width  = areaW;
+  canvas.height = areaH;
+
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, areaW, areaH);
+
+  // sheet top-left corner in canvas coords (pan offset applied)
+  const ox = MARGIN + viewPanX;
+  const oy = MARGIN + viewPanY;
+
+  // ── hatched background (clipped strictly to sheet bounds) ──
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(ox, oy, sw, sh);
+  ctx.clip();
+  ctx.fillStyle = '#f0ede8';           // light grey sheet fill
+  ctx.fillRect(ox, oy, sw, sh);
+  ctx.strokeStyle = '#b0a898';         // grey diagonal lines
+  ctx.lineWidth = 0.7;
+  const spacing = 20;
+  ctx.beginPath();
+  for (let k = -sh; k < sw + sh; k += spacing) {
+    ctx.moveTo(ox + k,      oy);
+    ctx.lineTo(ox + k + sh, oy + sh);
+  }
+  ctx.stroke();
+  ctx.restore();
+
+  // ── defects (solid black rectangles) ──
+  // coordinate flip: problem y=0 is bottom-left, canvas y=0 is top-left
+  for (const d of defects) {
+    const dx = ox + d.x * scale;
+    const dy = oy + (sheetH - d.y - d.height) * scale;
+    const dw = d.width  * scale;
+    const dh = d.height * scale;
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(dx, dy, dw, dh);
+  }
+
+  // ── sheet border ──
+  ctx.strokeStyle = '#000000';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(ox, oy, sw, sh);
+
+  // ── axis labels (all black) ──
+  ctx.fillStyle = '#000000';
+  ctx.font = '14px Georgia, serif';
+
+  // X axis: 0 at left, W at right, along the bottom edge
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillText('0',    ox,      oy + sh + 6);
+  ctx.fillText(sheetW, ox + sw, oy + sh + 6);
+
+  // Y axis: 0 at bottom-left, H at top-left
+  ctx.textAlign    = 'right';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('0',    ox - 6, oy + sh);
+  ctx.fillText(sheetH, ox - 6, oy);
+
+  // ── defect boundary tick labels ──
+  ctx.font = '12px Georgia, serif';
+  for (const d of defects) {
+    const dx0 = ox + d.x * scale;
+    const dx1 = ox + (d.x + d.width)  * scale;
+    const dy0 = oy + (sheetH - d.y) * scale;
+    const dy1 = oy + (sheetH - d.y - d.height) * scale;
+
+    // x ticks on bottom axis
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'top';
+    if (d.x > 0 && d.x < sheetW)
+      ctx.fillText(d.x,            dx0, oy + sh + 6);
+    if (d.x + d.width < sheetW)
+      ctx.fillText(d.x + d.width,  dx1, oy + sh + 6);
+
+    // y ticks on left axis
+    ctx.textAlign    = 'right';
+    ctx.textBaseline = 'middle';
+    if (d.y > 0 && d.y < sheetH)
+      ctx.fillText(d.y,            ox - 6, dy0);
+    if (d.y + d.height < sheetH)
+      ctx.fillText(d.y + d.height, ox - 6, dy1);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// ZOOM — zoom towards a point (cx, cy) in canvas coords
+// ══════════════════════════════════════════════════════════════════
+function applyZoom(delta, cx, cy) {
+  const area = document.getElementById('canvas-area');
+  const areaW = area.clientWidth;
+  const areaH = area.clientHeight;
+  const baseScale = Math.min(
+    (areaW - MARGIN * 2) / sheetW,
+    (areaH - MARGIN * 2) / sheetH
+  );
+
+  const oldZoom = viewZoom;
+  viewZoom = Math.max(0.2, Math.min(20, viewZoom * (1 + delta)));
+
+  const ratio = viewZoom / oldZoom;
+  const ox = MARGIN + viewPanX;
+  const oy = MARGIN + viewPanY;
+  viewPanX = cx - ratio * (cx - ox) - MARGIN;
+  viewPanY = cy - ratio * (cy - oy) - MARGIN;
+
+  clampPan(area, baseScale);
+  renderSheet();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// MOUSE EVENTS — scroll to zoom, drag to pan
+// ══════════════════════════════════════════════════════════════════
+const canvasArea = document.getElementById('canvas-area');
+
+canvasArea.addEventListener('wheel', e => {
+  e.preventDefault();
+  const rect = canvasArea.getBoundingClientRect();
+  applyZoom(e.deltaY < 0 ? 0.15 : -0.15,
+            e.clientX - rect.left,
+            e.clientY - rect.top);
+}, { passive: false });
+
+canvasArea.addEventListener('mousedown', e => {
+  isPanning     = true;
+  panStartX     = e.clientX;
+  panStartY     = e.clientY;
+  panStartViewX = viewPanX;
+  panStartViewY = viewPanY;
+});
+
+window.addEventListener('mousemove', e => {
+  if (!isPanning) return;
+  const area = document.getElementById('canvas-area');
+  const baseScale = Math.min(
+    (area.clientWidth  - MARGIN * 2) / sheetW,
+    (area.clientHeight - MARGIN * 2) / sheetH
+  );
+  viewPanX = panStartViewX + (e.clientX - panStartX);
+  viewPanY = panStartViewY + (e.clientY - panStartY);
+  clampPan(area, baseScale);
+  renderSheet();
+});
+
+window.addEventListener('mouseup', () => { isPanning = false; });
+
+// ══════════════════════════════════════════════════════════════════
+// KEYBOARD EVENTS — WASD to pan, Ctrl+/-  to zoom, R to reset
+// ══════════════════════════════════════════════════════════════════
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;  // don't hijack form inputs
+  const area = document.getElementById('canvas-area');
+  const baseScale = Math.min(
+    (area.clientWidth  - MARGIN * 2) / sheetW,
+    (area.clientHeight - MARGIN * 2) / sheetH
+  );
+  const step = 20;
+
+  if (e.key === 'w' || e.key === 'W') { viewPanY += step; clampPan(area, baseScale); renderSheet(); }
+  if (e.key === 's' || e.key === 'S') { viewPanY -= step; clampPan(area, baseScale); renderSheet(); }
+  if (e.key === 'a' || e.key === 'A') { viewPanX += step; clampPan(area, baseScale); renderSheet(); }
+  if (e.key === 'd' || e.key === 'D') { viewPanX -= step; clampPan(area, baseScale); renderSheet(); }
+  if (e.key === 'r' || e.key === 'R') { resetView(); renderSheet(); }
+
+  if (e.ctrlKey && (e.key === '+' || e.key === '=')) {
+    e.preventDefault();
+    applyZoom(0.2, area.clientWidth / 2, area.clientHeight / 2);
+  }
+  if (e.ctrlKey && e.key === '-') {
+    e.preventDefault();
+    applyZoom(-0.2, area.clientWidth / 2, area.clientHeight / 2);
+  }
+});
+
+// re-render on window resize
+window.addEventListener('resize', renderSheet);
+
+// initial render (empty sheet)
+renderSheet();
+</script>
+</body>
+</html>

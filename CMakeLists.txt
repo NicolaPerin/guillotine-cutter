@@ -25,6 +25,8 @@ include_directories(vendor)
 
 find_package(OpenMP REQUIRED)
 
+find_package(Threads REQUIRED)
+
 add_library(gdcut_core
     src/core/cut_candidates.cpp
     src/core/cut_node.cpp
@@ -37,8 +39,10 @@ add_library(gdcut_core
     src/core/recursive_solver.cpp
     src/core/solution_writer.cpp
     src/core/solver.cpp
+    src/server/server.cpp      # ← add
 )
-target_link_libraries(gdcut_core PUBLIC OpenMP::OpenMP_CXX)
+
+target_link_libraries(gdcut_core PUBLIC OpenMP::OpenMP_CXX Threads::Threads)
 
 add_executable(gdcut src/main.cpp)
 target_link_libraries(gdcut PRIVATE gdcut_core)
