@@ -36,17 +36,18 @@
       font-size: 0.82rem;
       font-weight: 600;
       color: #5c3a1e;
-      margin-bottom: 1rem;
+      margin-bottom: 0.6rem;
       text-transform: uppercase;
       letter-spacing: 0.08em;
+      flex-shrink: 0;
     }
 
-    /* ── two-column grid: left editor | right visualizer ── */
+    /* ── three-column grid: left editor | center plot | right stats ── */
     .layout {
       display: grid;
-      grid-template-columns: 320px 1fr;
-      gap: 1.5rem;
-      max-width: 1300px;
+      grid-template-columns: 300px 1fr 200px;
+      gap: 1.2rem;
+      max-width: 1400px;
       margin: 0 auto;
       flex: 1;
       min-height: 0;
@@ -57,11 +58,9 @@
     .left-col {
       display: flex;
       flex-direction: column;
-      gap: 0.75rem;
-      overflow-y: auto;
+      gap: 0.6rem;
       min-height: 0;
-      padding-right: 0.4rem;
-      padding-bottom: 0.5rem;
+      overflow: hidden;
     }
 
     /* ── card panel ── */
@@ -69,11 +68,31 @@
       background: #f5e6c8;
       border: 1px solid #a07840;
       border-radius: 4px;
-      padding: 1rem 1.25rem;
+      padding: 0.75rem 1rem;
       flex-shrink: 0;
     }
 
-    .field { margin-bottom: 0.75rem; }
+    /* ── items and defects panels: flex column to allow inner scroll ── */
+    .panel-scroll {
+      background: #f5e6c8;
+      border: 1px solid #a07840;
+      border-radius: 4px;
+      padding: 0.75rem 1rem;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      flex: 1;
+    }
+
+    /* ── scrollable table container ── */
+    .table-scroll {
+      overflow-y: auto;
+      flex: 1;
+      min-height: 0;
+      margin-bottom: 0.5rem;
+    }
+
+    .field { margin-bottom: 0.6rem; }
 
     label {
       display: block;
@@ -105,7 +124,6 @@
       width: 100%;
       border-collapse: collapse;
       font-size: 0.82rem;
-      margin-bottom: 0.6rem;
     }
     th {
       text-align: left;
@@ -116,6 +134,9 @@
       letter-spacing: 0.06em;
       padding: 0.25rem 0.3rem;
       border-bottom: 1px solid #a07840;
+      position: sticky;
+      top: 0;
+      background: #f5e6c8;
     }
     td { padding: 0.25rem 0.3rem; border-bottom: 1px solid #e0c990; }
     td input[type="number"] { padding: 0.15rem 0.3rem; }
@@ -143,19 +164,27 @@
     button.secondary { background: #d4a95a; color: #2c1a0e; }
     button.secondary:hover { background: #c8a85a; }
 
-    .btn-row { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
+    .btn-row { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+
+    /* ── bottom of left col: save/load/solve always visible ── */
+    .left-bottom {
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
 
     /* ── status message ── */
     #status {
       font-size: 0.82rem;
-      min-height: 1.1rem;
+      min-height: 1rem;
       color: #7a5230;
       flex-shrink: 0;
     }
     #status.ok  { color: #2d6a2d; }
     #status.err { color: #8b2e0e; }
 
-    /* ── right panel ── */
+    /* ── center panel ── */
     #canvas-panel {
       display: flex;
       flex-direction: column;
@@ -163,7 +192,7 @@
       background: #f5e6c8;
       border: 1px solid #a07840;
       border-radius: 4px;
-      padding: 1rem 1.25rem;
+      padding: 0.75rem 1rem;
     }
 
     /* ── panel top row: title + mode tabs ── */
@@ -172,7 +201,7 @@
       align-items: center;
       justify-content: space-between;
       flex-shrink: 0;
-      margin-bottom: 0.4rem;
+      margin-bottom: 0.2rem;
     }
 
     #canvas-title {
@@ -183,11 +212,31 @@
       letter-spacing: 0.08em;
     }
 
-    /* ── mode tabs: Sheet / Solution ── */
-    #mode-tabs {
-      display: flex;
-      gap: 0.4rem;
+    /* ── solve status row (below title) ── */
+    #solve-status-row {
+      display: none;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.78rem;
+      color: #000000;
+      flex-shrink: 0;
+      margin-bottom: 0.2rem;
     }
+    #solve-status-row.visible { display: flex; }
+
+    /* ── CSS spinner ── */
+    .spinner {
+      width: 14px; height: 14px;
+      border: 2px solid #ccbbaa;
+      border-top-color: #000000;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── mode tabs ── */
+    #mode-tabs { display: flex; gap: 0.4rem; }
 
     .tab-btn {
       background: #d4a95a;
@@ -202,15 +251,11 @@
       letter-spacing: 0.04em;
     }
     .tab-btn:hover { background: #c8a85a; }
-    .tab-btn.active {
-      background: #5c3a1e;
-      color: #f5e6c8;
-      border-color: #5c3a1e;
-    }
+    .tab-btn.active { background: #5c3a1e; color: #f5e6c8; border-color: #5c3a1e; }
 
     /* ── hint text ── */
     #canvas-hint {
-      font-size: 0.78rem;
+      font-size: 0.72rem;
       color: #a07840;
       text-align: right;
       flex-shrink: 0;
@@ -244,13 +289,12 @@
       align-items: center;
       justify-content: center;
       gap: 1.5rem;
-      padding-top: 0.6rem;
+      padding-top: 0.5rem;
     }
-
     #sol-controls.visible { display: flex; }
 
     #step-counter {
-      font-size: 1.1rem;
+      font-size: 1rem;
       font-weight: 700;
       color: #2c1a0e;
       min-width: 80px;
@@ -258,12 +302,10 @@
     }
 
     .step-btn {
-      background: #5c3a1e;
-      color: #f5e6c8;
-      border: none;
-      border-radius: 3px;
+      background: #5c3a1e; color: #f5e6c8;
+      border: none; border-radius: 3px;
       font-size: 1.1rem;
-      width: 36px; height: 36px;
+      width: 32px; height: 32px;
       cursor: pointer;
       font-family: Georgia, serif;
       display: flex; align-items: center; justify-content: center;
@@ -272,25 +314,50 @@
     .step-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
     #step-info {
-      font-size: 0.78rem;
+      font-size: 0.75rem;
       color: #7a5230;
       text-align: center;
       min-height: 1rem;
       flex-shrink: 0;
-      padding-top: 0.2rem;
+      padding-top: 0.15rem;
     }
 
-    /* ── solution stats bar ── */
-    #sol-stats {
-      display: none;
-      font-size: 0.78rem;
-      color: #5c3a1e;
-      gap: 1.5rem;
-      flex-shrink: 0;
-      padding-top: 0.3rem;
+    /* ── right column: stats panel ── */
+    #stats-panel {
+      display: flex;
+      flex-direction: column;
+      background: #f5e6c8;
+      border: 1px solid #a07840;
+      border-radius: 4px;
+      padding: 0.75rem 1rem;
+      gap: 0.6rem;
+      min-height: 0;
     }
-    #sol-stats.visible { display: flex; }
-    #sol-stats span b { color: #2c1a0e; }
+
+    .stat-block {
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+      padding-bottom: 0.6rem;
+      border-bottom: 1px solid #e0c990;
+    }
+    .stat-block:last-child { border-bottom: none; }
+
+    .stat-label {
+      font-size: 0.68rem;
+      color: #7a5230;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+    }
+
+    .stat-value {
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: #2c1a0e;
+      font-family: "Courier New", monospace;
+    }
+
+    .stat-na { color: #a07840; font-style: italic; font-weight: normal; font-size: 0.8rem; }
   </style>
 </head>
 <body>
@@ -320,13 +387,16 @@
       </div>
     </div>
 
-    <!-- items table -->
-    <div class="panel">
+    <!-- items panel with scrollable table -->
+    <div class="panel-scroll">
       <h2>Items</h2>
-      <table>
-        <thead><tr><th>Width</th><th>Height</th><th>Profit</th><th></th></tr></thead>
-        <tbody id="items-body"></tbody>
-      </table>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Width</th><th>Height</th><th>Profit</th><th></th></tr></thead>
+          <tbody id="items-body"></tbody>
+        </table>
+      </div>
+      <!-- new item input row — always visible -->
       <div class="row-3">
         <input type="number" id="new-w" placeholder="w" min="1">
         <input type="number" id="new-h" placeholder="h" min="1">
@@ -337,13 +407,16 @@
       </div>
     </div>
 
-    <!-- defects table -->
-    <div class="panel">
+    <!-- defects panel with scrollable table -->
+    <div class="panel-scroll">
       <h2>Defects</h2>
-      <table>
-        <thead><tr><th>X</th><th>Y</th><th>W</th><th>H</th><th></th></tr></thead>
-        <tbody id="defects-body"></tbody>
-      </table>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>X</th><th>Y</th><th>W</th><th>H</th><th></th></tr></thead>
+          <tbody id="defects-body"></tbody>
+        </table>
+      </div>
+      <!-- new defect input row — always visible -->
       <div class="row-4">
         <input type="number" id="new-dx" placeholder="x" min="0">
         <input type="number" id="new-dy" placeholder="y" min="0">
@@ -355,47 +428,65 @@
       </div>
     </div>
 
-    <!-- save / load / solve buttons -->
-    <div class="btn-row">
-      <button onclick="saveProblem()">Save problem</button>
-      <button class="secondary" onclick="loadProblem()">Load problem</button>
-    </div>
-    <div class="btn-row">
-      <button onclick="solveCurrentProblem()" id="btn-solve">Solve</button>
+    <!-- always-visible bottom: save/load/solve -->
+    <div class="panel">
+      <h2>Solver</h2>
+      <div class="field">
+        <label>Backend</label>
+        <select id="solver-select" style="
+          width: 100%; background: #fdf5e6; border: 1px solid #a07840;
+          border-radius: 2px; color: #000; padding: 0.3rem 0.5rem;
+          font-size: 0.85rem; font-family: Georgia, serif;">
+          <option value="auto">Auto</option>
+          <option value="iterative">Iterative</option>
+          <option value="recursive">Recursive</option>
+        </select>
+      </div>
     </div>
 
+    <div class="left-bottom">
+      <div class="btn-row">
+        <button onclick="saveProblem()">Save</button>
+        <button class="secondary" onclick="loadProblem()">Load</button>
+        <button onclick="solveCurrentProblem()" id="btn-solve">Solve</button>
+      </div>
+      <div id="status"></div>
+    </div>
     <!-- hidden file input -->
     <input type="file" id="file-input" accept=".json" style="display:none"
            onchange="onFileSelected(event)">
 
-    <!-- status message -->
-    <div id="status"></div>
-
   </div><!-- end left-col -->
 
   <!-- ══════════════════════════════════════════
-       RIGHT COLUMN — visualizer
+       CENTER COLUMN — visualizer
   ══════════════════════════════════════════ -->
   <div id="canvas-panel">
 
-    <!-- panel header: title + mode tabs -->
+    <!-- panel header -->
     <div id="panel-top">
       <div id="canvas-title">No problem loaded</div>
       <div id="mode-tabs">
         <button class="tab-btn active" onclick="setMode('sheet')">Sheet</button>
-        <button class="tab-btn"        onclick="setMode('solution')" id="tab-solution" disabled>Solution</button>
+        <button class="tab-btn" onclick="setMode('solution')" id="tab-solution" disabled>Solution</button>
       </div>
     </div>
 
-    <!-- hint line -->
+    <!-- solve status row with spinner -->
+    <div id="solve-status-row">
+      <div class="spinner" id="solve-spinner" style="display:none"></div>
+      <span id="solve-status-text"></span>
+    </div>
+
+    <!-- hint -->
     <div id="canvas-hint">scroll to zoom · drag to pan · WASD · R to reset</div>
 
-    <!-- canvas drawing area (shared by both modes) -->
+    <!-- canvas -->
     <div id="canvas-area">
       <span id="canvas-placeholder">Load or save a problem to visualize the sheet.</span>
     </div>
 
-    <!-- solution step controls (hidden until solution loaded) -->
+    <!-- solution controls -->
     <div id="sol-controls">
       <button class="step-btn" id="btn-prev" onclick="solGo(solCur-1)">&#8592;</button>
       <div id="step-counter">0 / 0</div>
@@ -403,14 +494,54 @@
     </div>
     <div id="step-info"></div>
 
-    <!-- solution stats -->
-    <div id="sol-stats">
-      <span>Value: <b id="stat-value">—</b></span>
-      <span>Utilization: <b id="stat-util">—</b></span>
-      <span>Efficiency: <b id="stat-eff">—</b></span>
+  </div><!-- end canvas-panel -->
+
+  <!-- ══════════════════════════════════════════
+       RIGHT COLUMN — stats
+  ══════════════════════════════════════════ -->
+  <div id="stats-panel">
+    <h2>Solution</h2>
+
+    <div class="stat-block">
+      <div class="stat-label">Value</div>
+      <div class="stat-value" id="stat-value"><span class="stat-na">—</span></div>
     </div>
 
-  </div><!-- end canvas-panel -->
+    <div class="stat-block">
+      <div class="stat-label">Utilization</div>
+      <div class="stat-value" id="stat-util"><span class="stat-na">—</span></div>
+    </div>
+
+    <div class="stat-block">
+      <div class="stat-label">Efficiency</div>
+      <div class="stat-value" id="stat-eff"><span class="stat-na">—</span></div>
+    </div>
+
+    <div class="stat-block">
+      <div class="stat-label">Defect loss</div>
+      <div class="stat-value" id="stat-def"><span class="stat-na">—</span></div>
+    </div>
+
+    <div class="stat-block">
+      <div class="stat-label">Step</div>
+      <div class="stat-value" id="stat-step"><span class="stat-na">—</span></div>
+    </div>
+
+    <div class="stat-block">
+      <div class="stat-label">Pieces</div>
+      <div class="stat-value" id="stat-pieces"><span class="stat-na">—</span></div>
+    </div>
+
+    <div class="stat-block">
+      <div class="stat-label">Solver</div>
+      <div class="stat-value" id="stat-backend"><span class="stat-na">—</span></div>
+    </div>
+
+    <div class="stat-block">
+      <div class="stat-label">Runtime</div>
+      <div class="stat-value" id="stat-time"><span class="stat-na">—</span></div>
+    </div>
+  </div>
 
 </div><!-- end layout -->
 
@@ -421,10 +552,9 @@
 let items   = [];
 let defects = [];
 let currentFilename = null;
-let currentMode = 'sheet';   // 'sheet' | 'solution'
-let solutionData = null;     // loaded solution JSON
+let currentMode = 'sheet';
+let solutionData = null;
 
-// view transform (shared)
 let viewZoom = 1.0;
 let viewPanX = 0;
 let viewPanY = 0;
@@ -434,19 +564,30 @@ let panStartViewX = 0, panStartViewY = 0;
 let sheetW = 100, sheetH = 100;
 const MARGIN = 48;
 
-// solution BFS state
-let solSteps = [];   // array of BFS frontier arrays
-let solCur   = 0;    // current step index
-let pastCutLines = [];  // cut lines from previous steps
+let solSteps = [];
+let solCur   = 0;
 
-// ══════════════════════════════════════════════════════════════════
-// ITEM COLORS — warm earthy palette with transparency
-// ══════════════════════════════════════════════════════════════════
 const ITEM_COLORS = [
   '#4a90d9', '#e07b3a', '#5ab55a', '#c44d8a',
   '#8b5cf6', '#d4a017', '#2a9d8f', '#e63946',
   '#457b9d', '#f4a261', '#2d6a4f', '#9b2335'
 ];
+
+// ══════════════════════════════════════════════════════════════════
+// SOLVE STATUS
+// ══════════════════════════════════════════════════════════════════
+function setSolveStatus(msg, spinning) {
+  const row = document.getElementById('solve-status-row');
+  const spinner = document.getElementById('solve-spinner');
+  const text = document.getElementById('solve-status-text');
+  if (msg) {
+    row.classList.add('visible');
+    text.textContent = msg;
+    spinner.style.display = spinning ? 'block' : 'none';
+  } else {
+    row.classList.remove('visible');
+  }
+}
 
 // ══════════════════════════════════════════════════════════════════
 // MODE SWITCHING
@@ -457,18 +598,15 @@ function setMode(mode) {
   document.querySelector(`.tab-btn[onclick="setMode('${mode}')"]`).classList.add('active');
 
   const solControls = document.getElementById('sol-controls');
-  const solStats    = document.getElementById('sol-stats');
   const hint        = document.getElementById('canvas-hint');
 
   if (mode === 'sheet') {
     solControls.classList.remove('visible');
-    solStats.classList.remove('visible');
     hint.textContent = 'scroll to zoom · drag to pan · WASD · R to reset';
     renderSheet();
   } else {
     solControls.classList.add('visible');
-    solStats.classList.add('visible');
-    hint.textContent = '← → arrow keys or click buttons to step · scroll to zoom · drag to pan';
+    hint.textContent = '← → arrow keys · scroll to zoom · drag to pan';
     renderSolution();
   }
 }
@@ -498,7 +636,7 @@ function addItem() {
   const h = +document.getElementById('new-h').value;
   const p = +document.getElementById('new-p').value || w * h;
   if (!w || !h) return setStatus('Item width and height are required.', true);
-  items.push({ width: w, height: h, profit: p || 1 });
+  items.push({ width: w, height: h, profit: p });
   ['new-w','new-h','new-p'].forEach(id => document.getElementById(id).value = '');
   renderItems();
 }
@@ -562,7 +700,7 @@ function buildProblem() {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// SAVE — browser download
+// SAVE
 // ══════════════════════════════════════════════════════════════════
 function saveProblem() {
   const prob = buildProblem();
@@ -580,7 +718,7 @@ function saveProblem() {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// LOAD — file browser
+// LOAD
 // ══════════════════════════════════════════════════════════════════
 function loadProblem() {
   document.getElementById('file-input').click();
@@ -632,29 +770,35 @@ async function solveCurrentProblem() {
   const prob = buildProblem();
   if (!prob) return;
 
-  setStatus('Saving problem...', false);
+  setSolveStatus('Saving...', true);
   let res = await fetch('/save', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(prob, null, 2)
   });
-  if (!res.ok) { setStatus('Save failed: ' + await res.text(), true); return; }
+  if (!res.ok) { setSolveStatus('Save failed.', false); return; }
 
-  setStatus('Solving...', false);
-  res = await fetch('/solve', { method: 'POST' });
-  if (!res.ok) { setStatus('Solve failed: ' + await res.text(), true); return; }
+  setSolveStatus('Solving...', true);
+  const solverMode = document.getElementById('solver-select').value;
+  res = await fetch('/solve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ solver: solverMode })
+  });
+  if (!res.ok) { setSolveStatus('Solve failed: ' + await res.text(), false); return; }
 
-  setStatus('Loading solution...', false);
+  setSolveStatus('Loading solution...', true);
   res = await fetch('/solution');
-  if (!res.ok) { setStatus('No solution found.', true); return; }
+  if (!res.ok) { setSolveStatus('No solution found.', false); return; }
 
   solutionData = await res.json();
   loadSolution(solutionData);
-  setStatus('Solved. ' + solutionData.solution.utilization, false);
+  setSolveStatus('Solved — ' + solutionData.solution.utilization, false);
+  setStatus('');
 }
 
 // ══════════════════════════════════════════════════════════════════
-// SOLUTION — build BFS steps from cut_sequence tree
+// SOLUTION — BFS
 // ══════════════════════════════════════════════════════════════════
 function loadSolution(sol) {
   const W = sol.problem.sheet_size[0];
@@ -663,15 +807,17 @@ function loadSolution(sol) {
 
   solSteps = buildBFSSteps(root, W, H);
   solCur   = 0;
-  pastCutLines = [];
 
-  // update stats bar
+  // update stats panel
   const s = sol.solution;
-  document.getElementById('stat-value').textContent = s.cut_area + ' / ' + s.total_area;
-  document.getElementById('stat-util').textContent  = s.utilization;
-  document.getElementById('stat-eff').textContent   = s.efficiency;
+  document.getElementById('stat-value').textContent   = s.cut_area + ' / ' + s.total_area;
+  document.getElementById('stat-util').textContent    = s.utilization;
+  document.getElementById('stat-eff').textContent     = s.efficiency;
+  document.getElementById('stat-def').textContent     = s.defect_loss;
+  document.getElementById('stat-backend').textContent = s.backend || '—';
+  document.getElementById('stat-time').textContent    =
+    s.elapsed_s !== undefined ? s.elapsed_s.toFixed(3) + 's' : '—';
 
-  // enable solution tab
   const tabSol = document.getElementById('tab-solution');
   tabSol.disabled = false;
   tabSol.removeAttribute('disabled');
@@ -680,9 +826,6 @@ function loadSolution(sol) {
   updateStepUI();
 }
 
-// Build BFS level array.
-// Each step is an array of {x, y, w, h, node} pieces at the current frontier.
-// Cut lines for that step are derived from pieces whose node is a cut.
 function buildBFSSteps(root, W, H) {
   const steps = [];
   let frontier = [{ x: 0, y: 0, w: W, h: H, node: root }];
@@ -691,7 +834,6 @@ function buildBFSSteps(root, W, H) {
   let changed = true;
   while (changed) {
     changed = false;
-    // find first cut node in frontier and expand it
     const next = [];
     let expanded = false;
     for (const p of frontier) {
@@ -711,24 +853,19 @@ function buildBFSSteps(root, W, H) {
         next.push(p);
       }
     }
-    if (changed) {
-      steps.push(next.slice());
-      frontier = next;
-    }
+    if (changed) { steps.push(next.slice()); frontier = next; }
   }
   return steps;
 }
 
-// Collect all cut lines introduced at step index (from the previous frontier)
 function getCutLinesAtStep(stepIdx) {
   if (stepIdx <= 0) return [];
   const lines = [];
   for (const p of solSteps[stepIdx - 1]) {
-    if (p.node && p.node.type === 'cut_x') {
+    if (p.node && p.node.type === 'cut_x')
       lines.push({ type: 'x', px: p.x, py: p.y, pw: p.w, ph: p.h, pos: p.node.position });
-    } else if (p.node && p.node.type === 'cut_y') {
+    else if (p.node && p.node.type === 'cut_y')
       lines.push({ type: 'y', px: p.x, py: p.y, pw: p.w, ph: p.h, pos: p.node.position });
-    }
   }
   return lines;
 }
@@ -746,6 +883,9 @@ function updateStepUI() {
   document.getElementById('step-counter').textContent = solCur + ' / ' + total;
   document.getElementById('btn-prev').disabled = solCur <= 0;
   document.getElementById('btn-next').disabled = solCur >= total;
+  document.getElementById('stat-step').textContent = solCur + ' / ' + total;
+  document.getElementById('stat-pieces').textContent =
+    solSteps[solCur] ? solSteps[solCur].length : '—';
 
   const info = document.getElementById('step-info');
   if (solCur === 0) {
@@ -767,11 +907,7 @@ function updateStepUI() {
 // ══════════════════════════════════════════════════════════════════
 // VIEW STATE
 // ══════════════════════════════════════════════════════════════════
-function resetView() {
-  viewZoom = 1.0;
-  viewPanX = 0;
-  viewPanY = 0;
-}
+function resetView() { viewZoom = 1.0; viewPanX = 0; viewPanY = 0; }
 
 function getBaseScale(areaW, areaH, W, H) {
   return Math.min((areaW - MARGIN * 2) / W, (areaH - MARGIN * 2) / H);
@@ -813,21 +949,18 @@ function renderSheet() {
 
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, areaW, areaH);
-
   const ox = MARGIN + viewPanX;
   const oy = MARGIN + viewPanY;
 
-  // hatched background clipped to sheet
+  // hatched background
   ctx.save();
   ctx.beginPath(); ctx.rect(ox, oy, sw, sh); ctx.clip();
   ctx.fillStyle = '#f0ede8';
   ctx.fillRect(ox, oy, sw, sh);
-  ctx.strokeStyle = '#b0a898';
-  ctx.lineWidth = 0.7;
+  ctx.strokeStyle = '#b0a898'; ctx.lineWidth = 0.7;
   ctx.beginPath();
   for (let k = -sh; k < sw + sh; k += 20) {
-    ctx.moveTo(ox + k, oy);
-    ctx.lineTo(ox + k + sh, oy + sh);
+    ctx.moveTo(ox + k, oy); ctx.lineTo(ox + k + sh, oy + sh);
   }
   ctx.stroke();
   ctx.restore();
@@ -835,29 +968,24 @@ function renderSheet() {
   // defects
   for (const d of defects) {
     ctx.fillStyle = '#000000';
-    ctx.fillRect(
-      ox + d.x * scale,
-      oy + (sheetH - d.y - d.height) * scale,
-      d.width * scale, d.height * scale
-    );
+    ctx.fillRect(ox + d.x * scale, oy + (sheetH - d.y - d.height) * scale,
+                 d.width * scale, d.height * scale);
   }
 
   // sheet border
-  ctx.strokeStyle = '#000000';
-  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#000000'; ctx.lineWidth = 2;
   ctx.strokeRect(ox, oy, sw, sh);
 
   // axis labels
-  ctx.fillStyle = '#000000';
-  ctx.font = '14px Georgia, serif';
+  ctx.fillStyle = '#000000'; ctx.font = '14px Georgia, serif';
   ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-  ctx.fillText('0',     ox,      oy + sh + 6);
-  ctx.fillText(sheetW,  ox + sw, oy + sh + 6);
+  ctx.fillText('0', ox, oy + sh + 6);
+  ctx.fillText(sheetW, ox + sw, oy + sh + 6);
   ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-  ctx.fillText('0',     ox - 6, oy + sh);
-  ctx.fillText(sheetH,  ox - 6, oy);
+  ctx.fillText('0', ox - 6, oy + sh);
+  ctx.fillText(sheetH, ox - 6, oy);
 
-  // defect boundary ticks
+  // defect ticks
   ctx.font = '12px Georgia, serif';
   for (const d of defects) {
     const dx0 = ox + d.x * scale;
@@ -865,11 +993,11 @@ function renderSheet() {
     const dy0 = oy + (sheetH - d.y) * scale;
     const dy1 = oy + (sheetH - d.y - d.height) * scale;
     ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-    if (d.x > 0 && d.x < sheetW)           ctx.fillText(d.x,           dx0, oy + sh + 6);
-    if (d.x + d.width < sheetW)             ctx.fillText(d.x+d.width,   dx1, oy + sh + 6);
+    if (d.x > 0 && d.x < sheetW)       ctx.fillText(d.x,           dx0, oy + sh + 6);
+    if (d.x + d.width < sheetW)         ctx.fillText(d.x+d.width,   dx1, oy + sh + 6);
     ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-    if (d.y > 0 && d.y < sheetH)           ctx.fillText(d.y,           ox - 6, dy0);
-    if (d.y + d.height < sheetH)            ctx.fillText(d.y+d.height,  ox - 6, dy1);
+    if (d.y > 0 && d.y < sheetH)       ctx.fillText(d.y,           ox - 6, dy0);
+    if (d.y + d.height < sheetH)        ctx.fillText(d.y+d.height,  ox - 6, dy1);
   }
 }
 
@@ -883,7 +1011,7 @@ function renderSolution() {
   const W     = sol.problem.sheet_size[0];
   const H     = sol.problem.sheet_size[1];
   const defs  = sol.problem.defects || [];
-  const items = sol.problem.items   || [];
+  const sitems = sol.problem.items  || [];
 
   const area  = document.getElementById('canvas-area');
   const ph    = document.getElementById('canvas-placeholder');
@@ -907,73 +1035,77 @@ function renderSolution() {
   const ox = MARGIN + viewPanX;
   const oy = MARGIN + viewPanY;
 
-  // white sheet base
+  // white base
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(ox, oy, sw, sh);
 
-  // draw all pieces at current BFS step
-  const frontier = solSteps[solCur];
-  for (const p of frontier) {
-    drawSolPiece(ctx, p, items, W, H, scale, ox, oy);
-  }
+  // draw pieces
+  for (const p of solSteps[solCur])
+    drawSolPiece(ctx, p, sitems, W, H, scale, ox, oy);
 
-  // defects on top
+  // defects
   for (const d of defs) {
     ctx.fillStyle = '#000000';
-    ctx.fillRect(
-      ox + d.x * scale,
-      oy + (H - d.y - d.height) * scale,
-      d.width * scale, d.height * scale
-    );
+    ctx.fillRect(ox + d.x * scale, oy + (H - d.y - d.height) * scale,
+                 d.width * scale, d.height * scale);
   }
 
-  // past cut lines (black)
-  ctx.lineWidth = 1.5;
+  // past cut lines (black), current cut lines (red)
   for (let s = 1; s <= solCur; s++) {
     const cuts = getCutLinesAtStep(s);
-    ctx.strokeStyle = (s === solCur) ? '#cc0000' : '#000000';
-    ctx.lineWidth   = (s === solCur) ? 2.5 : 1.0;
+    const isCurrent = (s === solCur);
+    ctx.strokeStyle = isCurrent ? '#cc0000' : '#000000';
+    ctx.lineWidth   = isCurrent ? 2.5 : 1.0;
     for (const c of cuts) drawCutLine(ctx, c, H, scale, ox, oy);
+
+    // red coordinate labels for current cut
+    if (isCurrent) {
+      ctx.fillStyle = '#cc0000';
+      ctx.font = 'bold 13px Georgia, serif';
+      for (const c of cuts) {
+        if (c.type === 'x') {
+          const lx = ox + (c.px + c.pos) * scale;
+          ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+          ctx.fillText(c.px + c.pos, lx, oy + sh + 6);
+        } else {
+          const ly = oy + (H - (c.py + c.pos)) * scale;
+          ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+          ctx.fillText(c.py + c.pos, ox - 6, ly);
+        }
+      }
+    }
   }
 
   // sheet border
-  ctx.strokeStyle = '#000000';
-  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#000000'; ctx.lineWidth = 2;
   ctx.strokeRect(ox, oy, sw, sh);
 
   // axis labels
-  ctx.fillStyle = '#000000';
-  ctx.font = '14px Georgia, serif';
+  ctx.fillStyle = '#000000'; ctx.font = '14px Georgia, serif';
   ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-  ctx.fillText('0', ox,      oy + sh + 6);
+  ctx.fillText('0', ox, oy + sh + 6);
   ctx.fillText(W,   ox + sw, oy + sh + 6);
   ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
   ctx.fillText('0', ox - 6, oy + sh);
   ctx.fillText(H,   ox - 6, oy);
 }
 
-// Draw a single cut line (vertical = cut_x, horizontal = cut_y)
 function drawCutLine(ctx, c, H, scale, ox, oy) {
   ctx.beginPath();
   if (c.type === 'x') {
-    // vertical line at x = px + pos, spanning py..py+ph
     const lx  = ox + (c.px + c.pos) * scale;
     const top = oy + (H - (c.py + c.ph)) * scale;
     const bot = oy + (H - c.py) * scale;
-    ctx.moveTo(lx, top);
-    ctx.lineTo(lx, bot);
+    ctx.moveTo(lx, top); ctx.lineTo(lx, bot);
   } else {
-    // horizontal line at y = py + pos, spanning px..px+pw
     const ly    = oy + (H - (c.py + c.pos)) * scale;
     const left  = ox + c.px * scale;
     const right = ox + (c.px + c.pw) * scale;
-    ctx.moveTo(left,  ly);
-    ctx.lineTo(right, ly);
+    ctx.moveTo(left, ly); ctx.lineTo(right, ly);
   }
   ctx.stroke();
 }
 
-// Draw a BFS piece — recursively fills the node tree within the piece bounds
 function drawSolPiece(ctx, p, items, W, H, scale, ox, oy) {
   const node = p.node;
   if (!node) return;
@@ -1000,24 +1132,19 @@ function drawSolPiece(ctx, p, items, W, H, scale, ox, oy) {
         const ty = oy + (H - p.y - (j + 1) * item.height) * scale;
         ctx.fillStyle = color + 'aa';
         ctx.fillRect(tx, ty, iw, ih);
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = color; ctx.lineWidth = 1.5;
         ctx.strokeRect(tx + 0.5, ty + 0.5, iw - 1, ih - 1);
         if (fs >= 8 && iw > 20 && ih > 12) {
           ctx.fillStyle = '#000000';
           ctx.font = 'bold ' + fs + 'px Georgia, serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
           ctx.fillText(label, tx + iw / 2, ty + ih / 2);
         }
       }
     }
 
-    // waste remainder strips
     const usedW = nx * item.width;
     const usedH = ny * item.height;
-
-    // waste remainder strips
     if (usedW < p.w)
       drawWasteRect(ctx, ox + (p.x + usedW) * scale, sy, (p.w - usedW) * scale, sh);
     if (usedH < p.h)
@@ -1025,19 +1152,16 @@ function drawSolPiece(ctx, p, items, W, H, scale, ox, oy) {
 
   } else if (node.type === 'empty' || node.type === 'defect') {
     drawWasteRect(ctx, sx, sy, sw, sh);
-
   } else {
-    // cut_x or cut_y — not yet expanded at this BFS level, draw as hatched
+    // unresolved cut — hatched
     ctx.fillStyle = '#f0ede8';
     ctx.fillRect(sx, sy, sw, sh);
     ctx.save();
     ctx.beginPath(); ctx.rect(sx, sy, sw, sh); ctx.clip();
-    ctx.strokeStyle = '#b0a898';
-    ctx.lineWidth = 0.7;
+    ctx.strokeStyle = '#b0a898'; ctx.lineWidth = 0.7;
     for (let k = -sh; k < sw + sh; k += 20) {
       ctx.beginPath();
-      ctx.moveTo(sx + k,      sy);
-      ctx.lineTo(sx + k + sh, sy + sh);
+      ctx.moveTo(sx + k, sy); ctx.lineTo(sx + k + sh, sy + sh);
       ctx.stroke();
     }
     ctx.restore();
@@ -1049,12 +1173,10 @@ function drawWasteRect(ctx, sx, sy, sw, sh) {
   ctx.fillRect(sx, sy, sw, sh);
   ctx.save();
   ctx.beginPath(); ctx.rect(sx, sy, sw, sh); ctx.clip();
-  ctx.strokeStyle = 'rgba(0,0,0,0.08)';
-  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(0,0,0,0.08)'; ctx.lineWidth = 1;
   ctx.beginPath();
   for (let k = -(sw+sh); k < sw+sh; k += 9) {
-    ctx.moveTo(sx + k,      sy);
-    ctx.lineTo(sx + k + sh, sy + sh);
+    ctx.moveTo(sx + k, sy); ctx.lineTo(sx + k + sh, sy + sh);
   }
   ctx.stroke();
   ctx.restore();
@@ -1064,14 +1186,12 @@ function drawWasteRect(ctx, sx, sy, sw, sh) {
 // ZOOM
 // ══════════════════════════════════════════════════════════════════
 function applyZoom(delta, cx, cy) {
-  const area   = document.getElementById('canvas-area');
-  const areaW  = area.clientWidth;
-  const areaH  = area.clientHeight;
+  const area  = document.getElementById('canvas-area');
   const W = currentMode === 'solution' && solutionData
     ? solutionData.problem.sheet_size[0] : sheetW;
   const H = currentMode === 'solution' && solutionData
     ? solutionData.problem.sheet_size[1] : sheetH;
-  const baseScale = getBaseScale(areaW, areaH, W, H);
+  const baseScale = getBaseScale(area.clientWidth, area.clientHeight, W, H);
 
   const oldZoom = viewZoom;
   viewZoom = Math.max(0.2, Math.min(20, viewZoom * (1 + delta)));
@@ -1081,9 +1201,7 @@ function applyZoom(delta, cx, cy) {
   viewPanX = cx - ratio * (cx - ox) - MARGIN;
   viewPanY = cy - ratio * (cy - oy) - MARGIN;
   clampPan(area, baseScale, W, H);
-
-  if (currentMode === 'sheet') renderSheet();
-  else renderSolution();
+  if (currentMode === 'sheet') renderSheet(); else renderSolution();
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -1099,11 +1217,9 @@ canvasArea.addEventListener('wheel', e => {
 }, { passive: false });
 
 canvasArea.addEventListener('mousedown', e => {
-  isPanning     = true;
-  panStartX     = e.clientX;
-  panStartY     = e.clientY;
-  panStartViewX = viewPanX;
-  panStartViewY = viewPanY;
+  isPanning = true;
+  panStartX = e.clientX; panStartY = e.clientY;
+  panStartViewX = viewPanX; panStartViewY = viewPanY;
 });
 
 window.addEventListener('mousemove', e => {
@@ -1117,14 +1233,13 @@ window.addEventListener('mousemove', e => {
   viewPanX = panStartViewX + (e.clientX - panStartX);
   viewPanY = panStartViewY + (e.clientY - panStartY);
   clampPan(area, baseScale, W, H);
-  if (currentMode === 'sheet') renderSheet();
-  else renderSolution();
+  if (currentMode === 'sheet') renderSheet(); else renderSolution();
 });
 
 window.addEventListener('mouseup', () => { isPanning = false; });
 
 // ══════════════════════════════════════════════════════════════════
-// KEYBOARD EVENTS
+// KEYBOARD
 // ══════════════════════════════════════════════════════════════════
 window.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
@@ -1136,38 +1251,31 @@ window.addEventListener('keydown', e => {
   const baseScale = getBaseScale(area.clientWidth, area.clientHeight, W, H);
   const step = 20;
 
-  // pan
   if (e.key === 'w' || e.key === 'W') { viewPanY += step; clampPan(area, baseScale, W, H); }
   if (e.key === 's' || e.key === 'S') { viewPanY -= step; clampPan(area, baseScale, W, H); }
   if (e.key === 'a' || e.key === 'A') { viewPanX += step; clampPan(area, baseScale, W, H); }
   if (e.key === 'd' || e.key === 'D') { viewPanX -= step; clampPan(area, baseScale, W, H); }
   if (e.key === 'r' || e.key === 'R') { resetView(); }
 
-  // solution step navigation
   if (currentMode === 'solution') {
     if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { solGo(solCur + 1); return; }
     if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   { solGo(solCur - 1); return; }
   }
 
-  // zoom
   if (e.ctrlKey && (e.key === '+' || e.key === '=')) {
     e.preventDefault();
-    applyZoom(0.2, area.clientWidth / 2, area.clientHeight / 2);
-    return;
+    applyZoom(0.2, area.clientWidth / 2, area.clientHeight / 2); return;
   }
   if (e.ctrlKey && e.key === '-') {
     e.preventDefault();
-    applyZoom(-0.2, area.clientWidth / 2, area.clientHeight / 2);
-    return;
+    applyZoom(-0.2, area.clientWidth / 2, area.clientHeight / 2); return;
   }
 
-  if (currentMode === 'sheet') renderSheet();
-  else renderSolution();
+  if (currentMode === 'sheet') renderSheet(); else renderSolution();
 });
 
 window.addEventListener('resize', () => {
-  if (currentMode === 'sheet') renderSheet();
-  else renderSolution();
+  if (currentMode === 'sheet') renderSheet(); else renderSolution();
 });
 
 // ══════════════════════════════════════════════════════════════════

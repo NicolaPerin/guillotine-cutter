@@ -45,15 +45,33 @@ void run_server(int port,
     });
 
     // solve the current problem.json
-    server.Post("/solve", [&](const httplib::Request&, httplib::Response& res) {
+    server.Post("/solve", [&](const httplib::Request& req, httplib::Response& res) {
         const std::string prob_path = work_dir + "/problem.json";
         const std::string sol_path  = work_dir + "/solution.json";
         try {
-            Problem     problem  = Problem::from_json(prob_path);
-            Solver      solver(problem);
-            int32_t     value    = solver.solve();
+            // parse solver preference from request body
+            std::string solver_mode = "auto";
+            if (!req.body.empty()) {
+                try {
+                    auto j = json::parse(req.body);
+                    if (j.contains("solver")) solver_mode = j["solver"];
+                } catch (...) {}
+            }
+
+            Solver::Mode mode = Solver::Mode::Auto;
+            if      (solver_mode == "iterative") mode = Solver::Mode::Iterative;
+            else if (solver_mode == "recursive") mode = Solver::Mode::Recursive;
+
+            Problem problem = Problem::from_json(prob_path);
+            Solver  solver(problem);
+
+            auto t0 = std::chrono::high_resolution_clock::now();
+            int32_t value = solver.solve(mode, Solver::SPARSE_THRESHOLD);
+            auto t1 = std::chrono::high_resolution_clock::now();
+            double elapsed = std::chrono::duration<double>(t1 - t0).count();
+
             CutSequence sequence = solver.reconstruct();
-            write_solution(sol_path, problem, value, sequence);
+            write_solution(sol_path, problem, value, sequence, solver.backend(), elapsed);
             res.set_content("ok", "text/plain");
         } catch (const std::exception& e) {
             res.status = 500;

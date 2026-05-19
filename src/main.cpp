@@ -64,10 +64,11 @@ int main(int argc, char* argv[]) {
         int32_t     value    = solver.solve(mode, sparse_threshold);
         CutSequence sequence = solver.reconstruct();
 
-        write_solution(output_path, problem, value, sequence);
-
         auto   t1      = std::chrono::high_resolution_clock::now();
         double elapsed = std::chrono::duration<double>(t1 - t0).count();
+
+        write_solution(output_path, problem, value, sequence, solver.backend(), elapsed);
+
         const int total_area = problem.sheet_width() * problem.sheet_height();
 
         auto backend_str = [&]() -> std::string {

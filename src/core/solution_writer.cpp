@@ -18,9 +18,11 @@ static std::string pct_str(int a, int b) {
 }
 
 void write_solution(const std::string& output_path,
-                    const Problem& problem,
-                    int32_t value,
-                    const CutSequence& sequence) {
+                    const Problem&     problem,
+                    int32_t            value,
+                    const CutSequence& sequence,
+                    Solver::Backend    backend,
+                    double             elapsed_s) {
     json out_file;
     out_file["problem"]["sheet_size"] = {problem.sheet_width(), problem.sheet_height()};
 
@@ -54,6 +56,15 @@ void write_solution(const std::string& output_path,
         {"utilization",  pct_str(value, total_area)},
         {"defect_loss",  pct_str(defect_area, total_area)},
         {"efficiency",   pct_str(value, usable_area)},
+        {"backend",      [&]() -> std::string {
+            switch (backend) {
+                case Solver::Backend::Pure:      return "pure";
+                case Solver::Backend::Iterative: return "iterative";
+                case Solver::Backend::Recursive: return "recursive";
+                default:                         return "unknown";
+            }
+        }()},
+        {"elapsed_s",    elapsed_s},
         {"cut_sequence", cut_sequence_to_json(sequence)}
     };
 
