@@ -589,11 +589,6 @@
       <div class="stat-label">Solver</div>
       <div class="stat-value" id="stat-backend"><span class="stat-na">—</span></div>
     </div>
-
-    <div class="stat-block">
-      <div class="stat-label">Runtime</div>
-      <div class="stat-value" id="stat-time"><span class="stat-na">—</span></div>
-    </div>
   </div>
 
 </div>
@@ -924,7 +919,11 @@ async function solveCurrentProblem() {
 
   solutionData = await res.json();
   loadSolution(solutionData);
-  setSolveStatus('Solved — ' + solutionData.solution.utilization, false);
+  
+  const elapsed = solutionData.solution.elapsed_s !== undefined 
+    ? solutionData.solution.elapsed_s.toFixed(3) + 's' 
+    : '—';
+  setSolveStatus('Solved — ' + elapsed, false);
   setStatus('');
 }
 
@@ -991,14 +990,19 @@ function loadSolution(sol) {
     });
   }
 
+  // update stats panel
   const s = sol.solution;
   document.getElementById('stat-value').textContent   = s.cut_area + ' / ' + s.total_area;
-  document.getElementById('stat-util').textContent    = s.utilization;
+  
+  // Clean up redundancies by displaying percentages only
+  const utilMatch = s.utilization.match(/\(([^)]+)\)/);
+  document.getElementById('stat-util').textContent    = utilMatch ? utilMatch[1] : s.utilization;
+  
   document.getElementById('stat-eff').textContent     = s.efficiency;
-  document.getElementById('stat-def').textContent     = s.defect_loss;
+  
+  const defMatch = s.defect_loss.match(/\(([^)]+)\)/);
+  document.getElementById('stat-def').textContent     = defMatch ? defMatch[1] : s.defect_loss;
   document.getElementById('stat-backend').textContent = s.backend || '—';
-  document.getElementById('stat-time').textContent    =
-    s.elapsed_s !== undefined ? s.elapsed_s.toFixed(3) + 's' : '—';
 
   const tabSol = document.getElementById('tab-solution');
   tabSol.disabled = false;
