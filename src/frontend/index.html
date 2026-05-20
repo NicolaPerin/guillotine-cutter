@@ -306,18 +306,31 @@
       font-style: italic;
     }
 
-    /* ── solution step controls ── */
-    #sol-controls {
+    /* ── unified step navigation controls ── */
+    .nav-controls-wrapper {
       display: none;
       flex-shrink: 0;
+      grid-template-columns: 80px 1fr 80px;
+      align-items: center;
+      padding-top: 0.5rem;
+    }
+    .nav-controls-wrapper.visible { display: grid; }
+
+    .nav-label-container {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #5c3a1e;
+      text-align: left;
+    }
+
+    .nav-buttons-container {
+      display: flex;
       align-items: center;
       justify-content: center;
       gap: 1.5rem;
-      padding-top: 0.5rem;
     }
-    #sol-controls.visible { display: flex; }
 
-    #step-counter {
+    .step-counter-display {
       font-size: 1rem;
       font-weight: 700;
       color: #2c1a0e;
@@ -385,7 +398,7 @@
 
     .stat-na { color: #a07840; font-style: italic; font-weight: normal; }
 
-    /* ── legend legend styles ── */
+    /* ── legend styles ── */
     .legend-row {
       display: flex;
       align-items: center;
@@ -484,8 +497,9 @@
     <input type="file" id="file-input" accept=".json" style="display:none"
            onchange="onFileSelected(event)">
 
-  </div><div id="canvas-panel">
+  </div>
 
+  <div id="canvas-panel">
     <div id="panel-top">
       <div id="canvas-title">No problem loaded</div>
       <div id="mode-tabs">
@@ -505,15 +519,32 @@
       <span id="canvas-placeholder">Set sheet dimensions or load a problem to visualize the workspace.</span>
     </div>
 
-    <div id="sol-controls">
-      <button class="step-btn" onclick="solGo(0)" title="First">«</button>
-      <button class="step-btn" id="btn-prev" onclick="solGo(solCur-1)">&#8592;</button>
-      <div id="step-counter">0 / 0</div>
-      <button class="step-btn" id="btn-next" onclick="solGo(solCur+1)">&#8594;</button>
-      <button class="step-btn" onclick="solGo(solSteps.length-1)" title="Last">»</button>
+    <div id="sheet-controls" class="nav-controls-wrapper">
+      <div class="nav-label-container">Defect:</div>
+      <div class="nav-buttons-container">
+        <button class="step-btn" onclick="defectGo(0)" title="First">«</button>
+        <button class="step-btn" id="btn-def-prev" onclick="defectGo(activeDefectIdx-1)">&#8592;</button>
+        <div id="defect-counter" class="step-counter-display">0 / 0</div>
+        <button class="step-btn" id="btn-def-next" onclick="defectGo(activeDefectIdx+1)">&#8594;</button>
+        <button class="step-btn" onclick="defectGo(sortedDefects.length-1)" title="Last">»</button>
+      </div>
+      <div></div>
     </div>
 
-  </div><div id="stats-panel">
+    <div id="sol-controls" class="nav-controls-wrapper">
+      <div class="nav-label-container">Cut:</div>
+      <div class="nav-buttons-container">
+        <button class="step-btn" onclick="solGo(0)" title="First">«</button>
+        <button class="step-btn" id="btn-prev" onclick="solGo(solCur-1)">&#8592;</button>
+        <div id="step-counter" class="step-counter-display">0 / 0</div>
+        <button class="step-btn" id="btn-next" onclick="solGo(solCur+1)">&#8594;</button>
+        <button class="step-btn" onclick="solGo(solSteps.length-1)" title="Last">»</button>
+      </div>
+      <div></div>
+    </div>
+  </div>
+
+  <div id="stats-panel">
     <h2>Solution</h2>
 
     <div class="stat-block">
@@ -554,12 +585,16 @@
     </div>
   </div>
 
-</div><script>
+</div>
+
+<script>
 // ══════════════════════════════════════════════════════════════════
 // STATE
 // ══════════════════════════════════════════════════════════════════
 let items   = [];
 let defects = [];
+let sortedDefects = [];
+let activeDefectIdx = -1;
 let currentFilename = null;
 let currentMode = 'sheet';
 let solutionData = null;
@@ -607,16 +642,18 @@ function setMode(mode) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   document.querySelector(`.tab-btn[onclick="setMode('${mode}')"]`).classList.add('active');
 
+  const sheetControls = document.getElementById('sheet-controls');
   const solControls = document.getElementById('sol-controls');
-  const hint        = document.getElementById('canvas-hint');
 
   if (mode === 'sheet') {
     solControls.classList.remove('visible');
-    hint.textContent = '';
+    updateDefectSortOrder();
     renderSheet();
   } else {
-    solControls.classList.add('visible');
-    hint.textContent = '';
+    sheetControls.classList.remove('visible');
+    if (solSteps.length > 0) {
+      solControls.classList.add('visible');
+    }
     renderSolution();
   }
 }
@@ -677,16 +714,69 @@ function renderDefects() {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td><input type="number" value="${d.x}"      min="0"
-          oninput="defects[${i}].x=+this.value; renderSheet()"></td>
+          oninput="defects[${i}].x=+this.value; updateDefectSortOrder(); renderSheet()"></td>
       <td><input type="number" value="${d.y}"      min="0"
-          oninput="defects[${i}].y=+this.value; renderSheet()"></td>
+          oninput="defects[${i}].y=+this.value; updateDefectSortOrder(); renderSheet()"></td>
       <td><input type="number" value="${d.width}"  min="1"
-          oninput="defects[${i}].width=+this.value; renderSheet()"></td>
+          oninput="defects[${i}].width=+this.value; updateDefectSortOrder(); renderSheet()"></td>
       <td><input type="number" value="${d.height}" min="1"
-          oninput="defects[${i}].height=+this.value; renderSheet()"></td>
+          oninput="defects[${i}].height=+this.value; updateDefectSortOrder(); renderSheet()"></td>
       <td><button class="btn-remove" onclick="removeDefect(${i})">✕</button></td>`;
     tbody.appendChild(tr);
   });
+}
+
+function updateDefectSortOrder() {
+  sheetW = +document.getElementById('sheet-w').value;
+  sheetH = +document.getElementById('sheet-h').value;
+  
+  sortedDefects = defects.map((d, index) => ({ ...d, originalIndex: index }));
+  
+  if (!sheetW || !sheetH || sortedDefects.length === 0) {
+    activeDefectIdx = -1;
+    document.getElementById('sheet-controls').classList.remove('visible');
+    return;
+  }
+
+  sortedDefects.sort((a, b) => {
+    const topA = sheetH - a.y;
+    const topB = sheetH - b.y;
+    if (Math.abs(topA - topB) > 0.0001) {
+      return topA - topB; 
+    }
+    return a.x - b.x;
+  });
+
+  if (activeDefectIdx >= sortedDefects.length || activeDefectIdx < 0) {
+    activeDefectIdx = 0;
+  }
+  
+  updateDefectUI();
+}
+
+function defectGo(n) {
+  if (!sortedDefects.length) return;
+  activeDefectIdx = Math.max(0, Math.min(sortedDefects.length - 1, n));
+  updateDefectUI();
+  renderSheet();
+}
+
+function updateDefectUI() {
+  const sheetControls = document.getElementById('sheet-controls');
+  if (currentMode === 'sheet' && sortedDefects.length > 0) {
+    sheetControls.classList.add('visible');
+  } else {
+    sheetControls.classList.remove('visible');
+  }
+
+  const total = sortedDefects.length;
+  const currentDisplay = total > 0 ? (activeDefectIdx + 1) : 0;
+  document.getElementById('defect-counter').textContent = currentDisplay + ' / ' + total;
+  
+  const btnPrev = document.getElementById('btn-def-prev');
+  const btnNext = document.getElementById('btn-def-next');
+  if (btnPrev) btnPrev.disabled = activeDefectIdx <= 0;
+  if (btnNext) btnNext.disabled = activeDefectIdx >= total - 1 || total === 0;
 }
 
 function addItem() {
@@ -708,26 +798,28 @@ function addDefect() {
   const h = +document.getElementById('new-dh').value;
   if (!w || !h) return setStatus('Defect width and height are required.', true);
   defects.push({ x, y, width: w, height: h });
-  ['new-dx','new-dy','new-dw','new-dh'].forEach(id =>
-    document.getElementById(id).value = '');
+  ['new-dx','new-dy','new-dw','new-dh'].forEach(id => document.getElementById(id).value = '');
   renderDefects();
+  updateDefectSortOrder();
   renderSheet();
 }
 
-function removeDefect(i) { defects.splice(i, 1); renderDefects(); renderSheet(); }
+// ══════════════════════════════════════════════════════════════════
+// SELECTION HANDLERS
+// ══════════════════════════════════════════════════════════════════
+function removeDefect(i) {
+  defects.splice(i, 1);
+  renderDefects();
+  updateDefectSortOrder();
+  renderSheet();
+}
 
-// ══════════════════════════════════════════════════════════════════
-// STATUS
-// ══════════════════════════════════════════════════════════════════
 function setStatus(msg, isError) {
   const el = document.getElementById('status');
   el.textContent = msg;
   el.className = isError ? 'err' : '';
 }
 
-// ══════════════════════════════════════════════════════════════════
-// BUILD PROBLEM JSON
-// ══════════════════════════════════════════════════════════════════
 function buildProblem() {
   const w = +document.getElementById('sheet-w').value;
   const h = +document.getElementById('sheet-h').value;
@@ -735,9 +827,6 @@ function buildProblem() {
   return { problem: { sheet_size: [w, h], items, defects } };
 }
 
-// ══════════════════════════════════════════════════════════════════
-// SAVE
-// ══════════════════════════════════════════════════════════════════
 function saveProblem() {
   const prob = buildProblem();
   if (!prob) return;
@@ -753,9 +842,6 @@ function saveProblem() {
   renderSheet();
 }
 
-// ══════════════════════════════════════════════════════════════════
-// LOAD
-// ══════════════════════════════════════════════════════════════════
 function loadProblem() {
   document.getElementById('file-input').click();
 }
@@ -771,6 +857,7 @@ function onFileSelected(event) {
       setStatus('', false);
       updateTitle();
       resetView();
+      updateDefectSortOrder();
       renderSheet();
     } catch { setStatus('Invalid JSON file.', true); }
   };
@@ -799,9 +886,6 @@ function updateTitle() {
     currentFilename ? 'Visualizing ' + currentFilename : 'No problem loaded';
 }
 
-// ══════════════════════════════════════════════════════════════════
-// SOLVE
-// ══════════════════════════════════════════════════════════════════
 async function solveCurrentProblem() {
   const prob = buildProblem();
   if (!prob) return;
@@ -846,7 +930,6 @@ function loadSolution(sol) {
   solCutsMade = result.cutsMade;
   solCur      = 0;
 
-  // compute final piece counts from last Bfs step
   const finalFrontier = result.steps[result.steps.length - 1];
   const itemCounts = {};
   let totalPieces = 0;
@@ -897,7 +980,6 @@ function loadSolution(sol) {
     });
   }
 
-  // update stats panel
   const s = sol.solution;
   document.getElementById('stat-value').textContent   = s.cut_area + ' / ' + s.total_area;
   document.getElementById('stat-util').textContent    = s.utilization;
@@ -977,7 +1059,7 @@ function updateStepUI() {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// VIEW STATE
+// ZOOM & VIEWPORT CLAMPING
 // ══════════════════════════════════════════════════════════════════
 function resetView() { viewZoom = 1.0; viewPanX = 0; viewPanY = 0; }
 
@@ -1031,7 +1113,6 @@ function renderSheet() {
   const ox = MARGIN + viewPanX;
   const oy = MARGIN + viewPanY;
 
-  // hatched background
   ctx.save();
   ctx.beginPath(); ctx.rect(ox, oy, sw, sh); ctx.clip();
   ctx.fillStyle = '#f0ede8';
@@ -1044,18 +1125,18 @@ function renderSheet() {
   ctx.stroke();
   ctx.restore();
 
-  // defects
-  for (const d of defects) {
-    ctx.fillStyle = '#000000';
+  let activeDefect = (activeDefectIdx >= 0 && activeDefectIdx < sortedDefects.length) ? sortedDefects[activeDefectIdx] : null;
+
+  sortedDefects.forEach((d, idx) => {
+    const isTarget = (idx === activeDefectIdx);
+    ctx.fillStyle = isTarget ? '#cc0000' : '#000000';
     ctx.fillRect(ox + d.x * scale, oy + (sheetH - d.y - d.height) * scale,
                  d.width * scale, d.height * scale);
-  }
+  });
 
-  // sheet border
   ctx.strokeStyle = '#000000'; ctx.lineWidth = 2;
   ctx.strokeRect(ox, oy, sw, sh);
 
-  // axis labels
   ctx.fillStyle = '#000000'; ctx.font = '14px Verdana, sans-serif';
   ctx.textAlign = 'center'; ctx.textBaseline = 'top';
   ctx.fillText('0', ox, oy + sh + 6);
@@ -1064,19 +1145,36 @@ function renderSheet() {
   ctx.fillText('0', ox - 6, oy + sh);
   ctx.fillText(sheetH, ox - 6, oy);
 
-  // defect ticks
-  ctx.font = '12px Verdana, sans-serif';
-  for (const d of defects) {
-    const dx0 = ox + d.x * scale;
-    const dx1 = ox + (d.x + d.width) * scale;
-    const dy0 = oy + (sheetH - d.y) * scale;
-    const dy1 = oy + (sheetH - d.y - d.height) * scale;
+  if (activeDefect) {
+    const dx0 = ox + activeDefect.x * scale;
+    const dx1 = ox + (activeDefect.x + activeDefect.width) * scale;
+    const dy0 = oy + (sheetH - activeDefect.y) * scale;
+    const dy1 = oy + (sheetH - activeDefect.y - activeDefect.height) * scale;
+
+    ctx.save();
+    ctx.strokeStyle = '#cc0000';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+
+    ctx.beginPath();
+    ctx.moveTo(dx0, dy1); ctx.lineTo(dx0, oy + sh);
+    ctx.moveTo(dx1, dy1); ctx.lineTo(dx1, oy + sh);
+
+    ctx.moveTo(dx1, dy0); ctx.lineTo(ox, dy0);
+    ctx.moveTo(dx1, dy1); ctx.lineTo(ox, dy1);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.font = 'bold 12px Verdana, sans-serif';
+    ctx.fillStyle = '#cc0000';
+
     ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-    if (d.x > 0 && d.x < sheetW)       ctx.fillText(d.x,           dx0, oy + sh + 6);
-    if (d.x + d.width < sheetW)         ctx.fillText(d.x+d.width,   dx1, oy + sh + 6);
+    ctx.fillText(activeDefect.x, dx0, oy + sh + 6);
+    ctx.fillText(activeDefect.x + activeDefect.width, dx1, oy + sh + 6);
+
     ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-    if (d.y > 0 && d.y < sheetH)       ctx.fillText(d.y,           ox - 6, dy0);
-    if (d.y + d.height < sheetH)        ctx.fillText(d.y+d.height,  ox - 6, dy1);
+    ctx.fillText(activeDefect.y, ox - 6, dy0);
+    ctx.fillText(activeDefect.y + activeDefect.height, ox - 6, dy1);
   }
 }
 
@@ -1114,36 +1212,30 @@ function renderSolution() {
   const ox = MARGIN + viewPanX;
   const oy = MARGIN + viewPanY;
 
-  // white base
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(ox, oy, sw, sh);
 
-  // draw pieces
   for (const p of solSteps[solCur])
     drawSolPiece(ctx, p, sitems, W, H, scale, ox, oy);
 
-  // defects
   for (const d of defs) {
     ctx.fillStyle = '#000000';
     ctx.fillRect(ox + d.x * scale, oy + (H - d.y - d.height) * scale,
                  d.width * scale, d.height * scale);
   }
 
-  // past cuts (black)
   ctx.strokeStyle = '#000000';
   ctx.lineWidth   = 1.0;
   for (let s = 1; s < solCur; s++) {
     if (solCutsMade[s]) drawCutLine(ctx, solCutsMade[s], H, scale, ox, oy);
   }
 
-  // current cut (red)
   if (solCur > 0 && solCutsMade[solCur]) {
     const c = solCutsMade[solCur];
     ctx.strokeStyle = '#cc0000';
     ctx.lineWidth   = 2.5;
     drawCutLine(ctx, c, H, scale, ox, oy);
 
-    // red coordinate label
     ctx.fillStyle = '#cc0000';
     ctx.font = 'bold 13px Verdana, sans-serif';
     if (c.type === 'x') {
@@ -1157,11 +1249,9 @@ function renderSolution() {
     }
   }
 
-  // sheet border
   ctx.strokeStyle = '#000000'; ctx.lineWidth = 2;
   ctx.strokeRect(ox, oy, sw, sh);
 
-  // axis labels
   ctx.fillStyle = '#000000'; ctx.font = '14px Verdana, sans-serif';
   ctx.textAlign = 'center'; ctx.textBaseline = 'top';
   ctx.fillText('0', ox, oy + sh + 6);
@@ -1263,7 +1353,7 @@ function drawWasteRect(ctx, sx, sy, sw, sh) {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// ZOOM
+// ZOOM APPLIER
 // ══════════════════════════════════════════════════════════════════
 function applyZoom(delta, cx, cy) {
   const area  = document.getElementById('canvas-area');
@@ -1343,6 +1433,11 @@ window.addEventListener('keydown', e => {
   if (e.key === 'd' || e.key === 'D') { viewPanX -= step; clampPan(area, baseScale, W, H); }
   if (e.key === 'r' || e.key === 'R') { resetView(); }
 
+  if (currentMode === 'sheet' && sortedDefects.length > 0) {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { defectGo(activeDefectIdx + 1); return; }
+    if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   { defectGo(activeDefectIdx - 1); return; }
+  }
+
   if (currentMode === 'solution') {
     if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { solGo(solCur + 1); return; }
     if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   { solGo(solCur - 1); return; }
@@ -1358,7 +1453,7 @@ window.addEventListener('keydown', e => {
   }
 
   if (currentMode === 'sheet') renderSheet(); else renderSolution();
-});renderDefects();
+});
 
 window.addEventListener('resize', () => {
   if (currentMode === 'sheet') renderSheet(); else renderSolution();
@@ -1370,7 +1465,6 @@ window.addEventListener('resize', () => {
 renderItems();
 renderDefects();
 
-// Explicitly clear sheet dimensions on page reload
 document.getElementById('sheet-w').value = '';
 document.getElementById('sheet-h').value = '';
 </script>
