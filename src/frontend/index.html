@@ -431,17 +431,14 @@
     <!-- always-visible bottom: save/load/solve -->
     <div class="panel">
       <h2>Solver</h2>
-      <div class="field">
-        <label>Backend</label>
-        <select id="solver-select" style="
-          width: 100%; background: #fdf5e6; border: 1px solid #a07840;
-          border-radius: 2px; color: #000; padding: 0.3rem 0.5rem;
-          font-size: 0.85rem; font-family: Georgia, serif;">
-          <option value="auto">Auto</option>
-          <option value="iterative">Iterative</option>
-          <option value="recursive">Recursive</option>
-        </select>
-      </div>
+      <select id="solver-select" style="
+        width: 100%; background: #fdf5e6; border: 1px solid #a07840;
+        border-radius: 2px; color: #000; padding: 0.3rem 0.5rem;
+        font-size: 0.85rem; font-family: Georgia, serif;">
+        <option value="auto">Auto</option>
+        <option value="iterative">Iterative</option>
+        <option value="recursive">Recursive</option>
+      </select>
     </div>
 
     <div class="left-bottom">
@@ -488,9 +485,11 @@
 
     <!-- solution controls -->
     <div id="sol-controls">
+      <button class="step-btn" onclick="solGo(0)" title="First">«</button>
       <button class="step-btn" id="btn-prev" onclick="solGo(solCur-1)">&#8592;</button>
       <div id="step-counter">0 / 0</div>
       <button class="step-btn" id="btn-next" onclick="solGo(solCur+1)">&#8594;</button>
+      <button class="step-btn" onclick="solGo(solSteps.length-1)" title="Last">»</button>
     </div>
     <div id="step-info"></div>
 
@@ -523,13 +522,10 @@
     </div>
 
     <div class="stat-block">
-      <div class="stat-label">Step</div>
-      <div class="stat-value" id="stat-step"><span class="stat-na">—</span></div>
-    </div>
-
-    <div class="stat-block">
       <div class="stat-label">Pieces</div>
-      <div class="stat-value" id="stat-pieces"><span class="stat-na">—</span></div>
+      <div class="stat-value" id="stat-pieces" style="white-space: pre; font-size: 0.78rem;">
+        <span class="stat-na">—</span>
+      </div>
     </div>
 
     <div class="stat-block">
@@ -566,6 +562,7 @@ const MARGIN = 48;
 
 let solSteps = [];
 let solCur   = 0;
+let solCutsMade = [];
 
 const ITEM_COLORS = [
   '#4a90d9', '#e07b3a', '#5ab55a', '#c44d8a',
@@ -805,8 +802,32 @@ function loadSolution(sol) {
   const H = sol.problem.sheet_size[1];
   const root = sol.solution.cut_sequence;
 
-  solSteps = buildBFSSteps(root, W, H);
-  solCur   = 0;
+  const result = buildBFSSteps(root, W, H);
+  solSteps    = result.steps;
+  solCutsMade = result.cutsMade;
+  solCur      = 0;
+
+  // compute final piece counts from last BFS step
+  const finalFrontier = result.steps[result.steps.length - 1];
+  const itemCounts = {};
+  let totalPieces = 0;
+  for (const p of finalFrontier) {
+    if (p.node && p.node.type === 'fill') {
+      const item = sol.problem.items[p.node.item];
+      if (!item) continue;
+      const nx = Math.floor(p.w / item.width);
+      const ny = Math.floor(p.h / item.height);
+      const count = nx * ny;
+      totalPieces += count;
+      const key = item.width + '×' + item.height;
+      itemCounts[key] = (itemCounts[key] || 0) + count;
+    }
+  }
+  const pieceLines = Object.entries(itemCounts)
+    .map(([k, v]) => v + ' × ' + k)
+    .join('\n');
+  document.getElementById('stat-pieces').textContent =
+    totalPieces + (pieceLines ? '\n' + pieceLines : '');
 
   // update stats panel
   const s = sol.solution;
@@ -827,7 +848,8 @@ function loadSolution(sol) {
 }
 
 function buildBFSSteps(root, W, H) {
-  const steps = [];
+  const steps    = [];
+  const cutsMade = [null]; // null for step 0
   let frontier = [{ x: 0, y: 0, w: W, h: H, node: root }];
   steps.push(frontier.slice());
 
@@ -836,38 +858,31 @@ function buildBFSSteps(root, W, H) {
     changed = false;
     const next = [];
     let expanded = false;
+    let cutMade  = null;
     for (const p of frontier) {
       if (!expanded && p.node && p.node.type === 'cut_x') {
         const z = p.node.position;
+        cutMade = { type: 'x', px: p.x, py: p.y, pw: p.w, ph: p.h, pos: z };
         next.push({ x: p.x,     y: p.y, w: z,     h: p.h, node: p.node.left  });
         next.push({ x: p.x + z, y: p.y, w: p.w-z, h: p.h, node: p.node.right });
-        expanded = true;
-        changed  = true;
+        expanded = true; changed = true;
       } else if (!expanded && p.node && p.node.type === 'cut_y') {
         const z = p.node.position;
+        cutMade = { type: 'y', px: p.x, py: p.y, pw: p.w, ph: p.h, pos: z };
         next.push({ x: p.x, y: p.y,     w: p.w, h: z,     node: p.node.left  });
         next.push({ x: p.x, y: p.y + z, w: p.w, h: p.h-z, node: p.node.right });
-        expanded = true;
-        changed  = true;
+        expanded = true; changed = true;
       } else {
         next.push(p);
       }
     }
-    if (changed) { steps.push(next.slice()); frontier = next; }
+    if (changed) {
+      steps.push(next.slice());
+      cutsMade.push(cutMade);
+      frontier = next;
+    }
   }
-  return steps;
-}
-
-function getCutLinesAtStep(stepIdx) {
-  if (stepIdx <= 0) return [];
-  const lines = [];
-  for (const p of solSteps[stepIdx - 1]) {
-    if (p.node && p.node.type === 'cut_x')
-      lines.push({ type: 'x', px: p.x, py: p.y, pw: p.w, ph: p.h, pos: p.node.position });
-    else if (p.node && p.node.type === 'cut_y')
-      lines.push({ type: 'y', px: p.x, py: p.y, pw: p.w, ph: p.h, pos: p.node.position });
-  }
-  return lines;
+  return { steps, cutsMade };
 }
 
 function solGo(n) {
@@ -881,11 +896,16 @@ function solGo(n) {
 function updateStepUI() {
   const total = solSteps.length - 1;
   document.getElementById('step-counter').textContent = solCur + ' / ' + total;
-  document.getElementById('btn-prev').disabled = solCur <= 0;
-  document.getElementById('btn-next').disabled = solCur >= total;
-  document.getElementById('stat-step').textContent = solCur + ' / ' + total;
-  document.getElementById('stat-pieces').textContent =
-    solSteps[solCur] ? solSteps[solCur].length : '—';
+  
+  const btnPrev  = document.getElementById('btn-prev');
+  const btnNext  = document.getElementById('btn-next');
+  const btnFirst = document.querySelector('.step-btn[title="First"]');
+  const btnLast  = document.querySelector('.step-btn[title="Last"]');
+
+  if (btnPrev)  btnPrev.disabled  = solCur <= 0;
+  if (btnNext)  btnNext.disabled  = solCur >= total;
+  if (btnFirst) btnFirst.disabled = solCur <= 0;
+  if (btnLast)  btnLast.disabled  = solCur >= total;
 
   const info = document.getElementById('step-info');
   if (solCur === 0) {
@@ -893,14 +913,13 @@ function updateStepUI() {
   } else if (solCur === total) {
     info.textContent = 'Final state — ' + solSteps[total].length + ' pieces.';
   } else {
-    const cuts = getCutLinesAtStep(solCur);
-    const xc = cuts.filter(c => c.type === 'x').length;
-    const yc = cuts.filter(c => c.type === 'y').length;
-    const parts = [];
-    if (xc) parts.push(xc + ' vertical cut' + (xc > 1 ? 's' : ''));
-    if (yc) parts.push(yc + ' horizontal cut' + (yc > 1 ? 's' : ''));
-    info.textContent = 'Step ' + solCur + ': ' + parts.join(', ')
-      + ' → ' + solSteps[solCur].length + ' pieces.';
+    const c = solCutsMade[solCur];
+    if (c) {
+      const dir = c.type === 'x' ? 'vertical' : 'horizontal';
+      info.textContent = 'Step ' + solCur + ': ' + dir + ' cut at '
+        + (c.type === 'x' ? 'x=' + (c.px + c.pos) : 'y=' + (c.py + c.pos))
+        + ' → ' + solSteps[solCur].length + ' pieces.';
+    }
   }
 }
 
@@ -1050,29 +1069,31 @@ function renderSolution() {
                  d.width * scale, d.height * scale);
   }
 
-  // past cut lines (black), current cut lines (red)
-  for (let s = 1; s <= solCur; s++) {
-    const cuts = getCutLinesAtStep(s);
-    const isCurrent = (s === solCur);
-    ctx.strokeStyle = isCurrent ? '#cc0000' : '#000000';
-    ctx.lineWidth   = isCurrent ? 2.5 : 1.0;
-    for (const c of cuts) drawCutLine(ctx, c, H, scale, ox, oy);
+  // past cuts (black)
+  ctx.strokeStyle = '#000000';
+  ctx.lineWidth   = 1.0;
+  for (let s = 1; s < solCur; s++) {
+    if (solCutsMade[s]) drawCutLine(ctx, solCutsMade[s], H, scale, ox, oy);
+  }
 
-    // red coordinate labels for current cut
-    if (isCurrent) {
-      ctx.fillStyle = '#cc0000';
-      ctx.font = 'bold 13px Georgia, serif';
-      for (const c of cuts) {
-        if (c.type === 'x') {
-          const lx = ox + (c.px + c.pos) * scale;
-          ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-          ctx.fillText(c.px + c.pos, lx, oy + sh + 6);
-        } else {
-          const ly = oy + (H - (c.py + c.pos)) * scale;
-          ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-          ctx.fillText(c.py + c.pos, ox - 6, ly);
-        }
-      }
+  // current cut (red)
+  if (solCur > 0 && solCutsMade[solCur]) {
+    const c = solCutsMade[solCur];
+    ctx.strokeStyle = '#cc0000';
+    ctx.lineWidth   = 2.5;
+    drawCutLine(ctx, c, H, scale, ox, oy);
+
+    // red coordinate label
+    ctx.fillStyle = '#cc0000';
+    ctx.font = 'bold 13px Georgia, serif';
+    if (c.type === 'x') {
+      const lx = ox + (c.px + c.pos) * scale;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.fillText(c.px + c.pos, lx, oy + sh + 6);
+    } else {
+      const ly = oy + (H - (c.py + c.pos)) * scale;
+      ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      ctx.fillText(c.py + c.pos, ox - 6, ly);
     }
   }
 
