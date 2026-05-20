@@ -10,35 +10,25 @@
 
     /* ── page layout ── */
     body {
-      font-family: Georgia, "Times New Roman", serif;
+      font-family: Verdana, sans-serif;
       background: #c8a85a;
       color: #2c1a0e;
       height: 100vh;
       overflow: hidden;
-      padding: 1rem 2rem;
+      padding: 1rem 2rem 0 2rem;
       display: flex;
       flex-direction: column;
+      font-size: 1rem;
     }
 
     /* ── page title ── */
     h1 {
       font-size: 1.5rem;
-      font-weight: 600;
+      font-weight: 700;
       color: #2c1a0e;
       margin-bottom: 1rem;
       letter-spacing: 0.02em;
       text-align: center;
-      flex-shrink: 0;
-    }
-
-    /* ── panel section headings ── */
-    h2 {
-      font-size: 0.82rem;
-      font-weight: 600;
-      color: #5c3a1e;
-      margin-bottom: 0.6rem;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
       flex-shrink: 0;
     }
 
@@ -61,6 +51,16 @@
       gap: 0.6rem;
       min-height: 0;
       overflow: hidden;
+    }
+
+    /* ── panel section headings ── */
+    h2 {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #5c3a1e;
+      margin-bottom: 0.6rem;
+      letter-spacing: 0.08em;
+      flex-shrink: 0;
     }
 
     /* ── card panel ── */
@@ -96,11 +96,11 @@
 
     label {
       display: block;
-      font-size: 0.72rem;
+      font-size: 0.85rem;
       color: #7a5230;
       margin-bottom: 0.25rem;
-      text-transform: uppercase;
       letter-spacing: 0.06em;
+      font-weight: 400;
     }
 
     input[type="number"] {
@@ -110,9 +110,9 @@
       border-radius: 2px;
       color: #000000;
       padding: 0.3rem 0.5rem;
-      font-size: 0.95rem;
-      font-weight: 700;
-      font-family: "Courier New", Courier, monospace;
+      font-size: 1rem;
+      font-weight: 400;
+      font-family: Verdana, sans-serif;
     }
     input[type="number"]:focus { outline: none; border-color: #5c3a1e; }
 
@@ -123,14 +123,13 @@
     table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 0.82rem;
+      font-size: 1rem;
     }
     th {
       text-align: left;
       color: #7a5230;
-      font-weight: 600;
-      font-size: 0.7rem;
-      text-transform: uppercase;
+      font-weight: 400;
+      font-size: 0.85rem;
       letter-spacing: 0.06em;
       padding: 0.25rem 0.3rem;
       border-bottom: 1px solid #a07840;
@@ -138,13 +137,13 @@
       top: 0;
       background: #f5e6c8;
     }
-    td { padding: 0.25rem 0.3rem; border-bottom: 1px solid #e0c990; }
-    td input[type="number"] { padding: 0.15rem 0.3rem; }
+    td { padding: 0.25rem 0.3rem; border-bottom: 1px solid #e0c990; font-weight: 400; }
+    td input[type="number"] { padding: 0.15rem 0.3rem; font-weight: 400; }
 
     .btn-remove {
       background: none; border: none;
       color: #8b2e0e; cursor: pointer;
-      font-size: 0.9rem; padding: 0 0.2rem;
+      font-size: 1rem; padding: 0 0.2rem;
     }
     .btn-remove:hover { color: #c0392b; }
 
@@ -152,10 +151,10 @@
     button {
       background: #5c3a1e; border: none;
       border-radius: 3px; color: #f5e6c8;
-      cursor: pointer; font-size: 0.82rem;
-      font-weight: 600; padding: 0.4rem 0.9rem;
+      cursor: pointer; font-size: 1rem;
+      font-weight: 700; padding: 0.4rem 0.9rem;
       letter-spacing: 0.03em;
-      font-family: Georgia, "Times New Roman", serif;
+      font-family: Verdana, sans-serif;
     }
     button:hover { background: #7a5230; }
     button:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -166,22 +165,40 @@
 
     .btn-row { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
 
-    /* ── bottom of left col: save/load/solve always visible ── */
+    /* ── bottom action layout configurations ── */
     .left-bottom {
       flex-shrink: 0;
       display: flex;
       flex-direction: column;
-      gap: 0.4rem;
+      margin-top: auto;
+      padding-bottom: 1rem;
     }
+    
+    .left-bottom .btn-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 0.5rem;
+      margin-top: 0;
+      width: 100%;
+    }
+
+    .left-bottom button {
+      background: #5c3a1e;
+      color: #f5e6c8;
+      width: 100%;
+      height: 100%;
+      padding: 0.6rem 0rem;
+      text-align: center;
+    }
+    .left-bottom button:hover { background: #7a5230; }
 
     /* ── status message ── */
     #status {
-      font-size: 0.82rem;
+      font-size: 1rem;
       min-height: 1rem;
       color: #7a5230;
       flex-shrink: 0;
     }
-    #status.ok  { color: #2d6a2d; }
     #status.err { color: #8b2e0e; }
 
     /* ── center panel ── */
@@ -193,6 +210,7 @@
       border: 1px solid #a07840;
       border-radius: 4px;
       padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
     }
 
     /* ── panel top row: title + mode tabs ── */
@@ -205,10 +223,9 @@
     }
 
     #canvas-title {
-      font-size: 0.82rem;
-      font-weight: 600;
+      font-size: 1rem;
+      font-weight: 700;
       color: #5c3a1e;
-      text-transform: uppercase;
       letter-spacing: 0.08em;
     }
 
@@ -217,7 +234,7 @@
       display: none;
       align-items: center;
       gap: 0.5rem;
-      font-size: 0.78rem;
+      font-size: 1rem;
       color: #000000;
       flex-shrink: 0;
       margin-bottom: 0.2rem;
@@ -243,11 +260,11 @@
       color: #2c1a0e;
       border: 1px solid #a07840;
       border-radius: 3px;
-      font-size: 0.75rem;
-      font-weight: 600;
+      font-size: 0.85rem;
+      font-weight: 700;
       padding: 0.25rem 0.7rem;
       cursor: pointer;
-      font-family: Georgia, "Times New Roman", serif;
+      font-family: Verdana, sans-serif;
       letter-spacing: 0.04em;
     }
     .tab-btn:hover { background: #c8a85a; }
@@ -255,7 +272,7 @@
 
     /* ── hint text ── */
     #canvas-hint {
-      font-size: 0.72rem;
+      font-size: 0.85rem;
       color: #a07840;
       text-align: right;
       flex-shrink: 0;
@@ -275,12 +292,19 @@
       align-items: center;
       justify-content: center;
       color: #a07840;
-      font-size: 0.85rem;
+      font-size: 1rem;
       cursor: grab;
       position: relative;
     }
     #canvas-area:active { cursor: grabbing; }
     #canvas-area canvas { display: block; position: absolute; top: 0; left: 0; }
+    
+    #canvas-placeholder {
+      padding: 2rem;
+      text-align: center;
+      color: #a07840;
+      font-style: italic;
+    }
 
     /* ── solution step controls ── */
     #sol-controls {
@@ -304,22 +328,22 @@
     .step-btn {
       background: #5c3a1e; color: #f5e6c8;
       border: none; border-radius: 3px;
-      font-size: 1.1rem;
+      font-size: 1rem;
       width: 32px; height: 32px;
       cursor: pointer;
-      font-family: Georgia, serif;
+      font-family: Verdana, sans-serif;
       display: flex; align-items: center; justify-content: center;
     }
     .step-btn:hover:not(:disabled) { background: #7a5230; }
     .step-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
-    #step-info {
-      font-size: 0.75rem;
-      color: #7a5230;
+    /* Empty state messaging styles */
+    .empty-state {
+      padding: 1rem 0.5rem;
+      color: #a07840;
+      font-style: italic;
       text-align: center;
-      min-height: 1rem;
-      flex-shrink: 0;
-      padding-top: 0.15rem;
+      font-weight: 400;
     }
 
     /* ── right column: stats panel ── */
@@ -332,6 +356,8 @@
       padding: 0.75rem 1rem;
       gap: 0.6rem;
       min-height: 0;
+      margin-bottom: 1rem;
+      overflow-y: auto;
     }
 
     .stat-block {
@@ -344,59 +370,67 @@
     .stat-block:last-child { border-bottom: none; }
 
     .stat-label {
-      font-size: 0.68rem;
+      font-size: 1rem;
+      font-weight: 700;
       color: #7a5230;
-      text-transform: uppercase;
       letter-spacing: 0.07em;
     }
 
     .stat-value {
-      font-size: 0.9rem;
-      font-weight: 700;
+      font-size: 1rem;
+      font-weight: 400;
       color: #2c1a0e;
-      font-family: "Courier New", monospace;
+      font-family: Verdana, sans-serif;
     }
 
-    .stat-na { color: #a07840; font-style: italic; font-weight: normal; font-size: 0.8rem; }
+    .stat-na { color: #a07840; font-style: italic; font-weight: normal; }
+
+    /* ── legend legend styles ── */
+    .legend-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 0.2rem;
+    }
+    .legend-box {
+      width: 12px;
+      height: 12px;
+      border: 1px solid rgba(0,0,0,0.2);
+      flex-shrink: 0;
+    }
   </style>
 </head>
 <body>
 
-<!-- ── page title ── -->
 <h1>gdcut — guillotine cutting solver</h1>
 
 <div class="layout">
 
-  <!-- ══════════════════════════════════════════
-       LEFT COLUMN — problem editor
-  ══════════════════════════════════════════ -->
   <div class="left-col">
 
-    <!-- sheet dimensions -->
     <div class="panel">
       <h2>Sheet</h2>
       <div class="row">
         <div class="field">
           <label>Width</label>
-          <input type="number" id="sheet-w" value="100" min="1" oninput="renderSheet()">
+          <input type="number" id="sheet-w" min="1" oninput="renderSheet()" autocomplete="off">
         </div>
         <div class="field">
           <label>Height</label>
-          <input type="number" id="sheet-h" value="100" min="1" oninput="renderSheet()">
+          <input type="number" id="sheet-h" min="1" oninput="renderSheet()" autocomplete="off">
         </div>
       </div>
     </div>
 
-    <!-- items panel with scrollable table -->
     <div class="panel-scroll">
       <h2>Items</h2>
       <div class="table-scroll">
-        <table>
+        <table id="items-table" style="display: none;">
           <thead><tr><th>Width</th><th>Height</th><th>Profit</th><th></th></tr></thead>
           <tbody id="items-body"></tbody>
         </table>
+        <div id="items-empty" class="empty-state">No items configured. Add an item below to begin.</div>
       </div>
-      <!-- new item input row — always visible -->
       <div class="row-3">
         <input type="number" id="new-w" placeholder="w" min="1">
         <input type="number" id="new-h" placeholder="h" min="1">
@@ -407,16 +441,15 @@
       </div>
     </div>
 
-    <!-- defects panel with scrollable table -->
     <div class="panel-scroll">
       <h2>Defects</h2>
       <div class="table-scroll">
-        <table>
+        <table id="defects-table" style="display: none;">
           <thead><tr><th>X</th><th>Y</th><th>W</th><th>H</th><th></th></tr></thead>
           <tbody id="defects-body"></tbody>
         </table>
+        <div id="defects-empty" class="empty-state">No defects defined. Add a defect position if applicable.</div>
       </div>
-      <!-- new defect input row — always visible -->
       <div class="row-4">
         <input type="number" id="new-dx" placeholder="x" min="0">
         <input type="number" id="new-dy" placeholder="y" min="0">
@@ -428,13 +461,12 @@
       </div>
     </div>
 
-    <!-- always-visible bottom: save/load/solve -->
-    <div class="panel">
+    <div class="panel" style="margin-bottom: 0.6rem;">
       <h2>Solver</h2>
       <select id="solver-select" style="
         width: 100%; background: #fdf5e6; border: 1px solid #a07840;
         border-radius: 2px; color: #000; padding: 0.3rem 0.5rem;
-        font-size: 0.85rem; font-family: Georgia, serif;">
+        font-size: 1rem; font-family: Verdana, sans-serif; font-weight: 400;">
         <option value="auto">Auto</option>
         <option value="iterative">Iterative</option>
         <option value="recursive">Recursive</option>
@@ -442,25 +474,18 @@
     </div>
 
     <div class="left-bottom">
+      <div id="status"></div>
       <div class="btn-row">
         <button onclick="saveProblem()">Save</button>
-        <button class="secondary" onclick="loadProblem()">Load</button>
+        <button onclick="loadProblem()">Load</button>
         <button onclick="solveCurrentProblem()" id="btn-solve">Solve</button>
       </div>
-      <div id="status"></div>
     </div>
-    <!-- hidden file input -->
     <input type="file" id="file-input" accept=".json" style="display:none"
            onchange="onFileSelected(event)">
 
-  </div><!-- end left-col -->
+  </div><div id="canvas-panel">
 
-  <!-- ══════════════════════════════════════════
-       CENTER COLUMN — visualizer
-  ══════════════════════════════════════════ -->
-  <div id="canvas-panel">
-
-    <!-- panel header -->
     <div id="panel-top">
       <div id="canvas-title">No problem loaded</div>
       <div id="mode-tabs">
@@ -469,21 +494,17 @@
       </div>
     </div>
 
-    <!-- solve status row with spinner -->
     <div id="solve-status-row">
       <div class="spinner" id="solve-spinner" style="display:none"></div>
       <span id="solve-status-text"></span>
     </div>
 
-    <!-- hint -->
-    <div id="canvas-hint">scroll to zoom · drag to pan · WASD · R to reset</div>
+    <div id="canvas-hint"></div>
 
-    <!-- canvas -->
     <div id="canvas-area">
-      <span id="canvas-placeholder">Load or save a problem to visualize the sheet.</span>
+      <span id="canvas-placeholder">Set sheet dimensions or load a problem to visualize the workspace.</span>
     </div>
 
-    <!-- solution controls -->
     <div id="sol-controls">
       <button class="step-btn" onclick="solGo(0)" title="First">«</button>
       <button class="step-btn" id="btn-prev" onclick="solGo(solCur-1)">&#8592;</button>
@@ -491,14 +512,8 @@
       <button class="step-btn" id="btn-next" onclick="solGo(solCur+1)">&#8594;</button>
       <button class="step-btn" onclick="solGo(solSteps.length-1)" title="Last">»</button>
     </div>
-    <div id="step-info"></div>
 
-  </div><!-- end canvas-panel -->
-
-  <!-- ══════════════════════════════════════════
-       RIGHT COLUMN — stats
-  ══════════════════════════════════════════ -->
-  <div id="stats-panel">
+  </div><div id="stats-panel">
     <h2>Solution</h2>
 
     <div class="stat-block">
@@ -523,7 +538,7 @@
 
     <div class="stat-block">
       <div class="stat-label">Pieces</div>
-      <div class="stat-value" id="stat-pieces" style="white-space: pre; font-size: 0.78rem;">
+      <div class="stat-value" id="stat-pieces">
         <span class="stat-na">—</span>
       </div>
     </div>
@@ -539,9 +554,7 @@
     </div>
   </div>
 
-</div><!-- end layout -->
-
-<script>
+</div><script>
 // ══════════════════════════════════════════════════════════════════
 // STATE
 // ══════════════════════════════════════════════════════════════════
@@ -557,7 +570,7 @@ let viewPanY = 0;
 let isPanning = false;
 let panStartX = 0, panStartY = 0;
 let panStartViewX = 0, panStartViewY = 0;
-let sheetW = 100, sheetH = 100;
+let sheetW = 0, sheetH = 0;
 const MARGIN = 48;
 
 let solSteps = [];
@@ -599,11 +612,11 @@ function setMode(mode) {
 
   if (mode === 'sheet') {
     solControls.classList.remove('visible');
-    hint.textContent = 'scroll to zoom · drag to pan · WASD · R to reset';
+    hint.textContent = '';
     renderSheet();
   } else {
     solControls.classList.add('visible');
-    hint.textContent = '← → arrow keys · scroll to zoom · drag to pan';
+    hint.textContent = '';
     renderSolution();
   }
 }
@@ -613,7 +626,20 @@ function setMode(mode) {
 // ══════════════════════════════════════════════════════════════════
 function renderItems() {
   const tbody = document.getElementById('items-body');
+  const table = document.getElementById('items-table');
+  const empty = document.getElementById('items-empty');
+  
   tbody.innerHTML = '';
+  
+  if (items.length === 0) {
+    table.style.display = 'none';
+    empty.style.display = 'block';
+    return;
+  }
+  
+  table.style.display = 'table';
+  empty.style.display = 'none';
+
   items.forEach((item, i) => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
@@ -628,24 +654,25 @@ function renderItems() {
   });
 }
 
-function addItem() {
-  const w = +document.getElementById('new-w').value;
-  const h = +document.getElementById('new-h').value;
-  const p = +document.getElementById('new-p').value || w * h;
-  if (!w || !h) return setStatus('Item width and height are required.', true);
-  items.push({ width: w, height: h, profit: p });
-  ['new-w','new-h','new-p'].forEach(id => document.getElementById(id).value = '');
-  renderItems();
-}
-
-function removeItem(i) { items.splice(i, 1); renderItems(); }
-
 // ══════════════════════════════════════════════════════════════════
 // DEFECTS
 // ══════════════════════════════════════════════════════════════════
 function renderDefects() {
   const tbody = document.getElementById('defects-body');
+  const table = document.getElementById('defects-table');
+  const empty = document.getElementById('defects-empty');
+  
   tbody.innerHTML = '';
+
+  if (defects.length === 0) {
+    table.style.display = 'none';
+    empty.style.display = 'block';
+    return;
+  }
+
+  table.style.display = 'table';
+  empty.style.display = 'none';
+
   defects.forEach((d, i) => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
@@ -661,6 +688,18 @@ function renderDefects() {
     tbody.appendChild(tr);
   });
 }
+
+function addItem() {
+  const w = +document.getElementById('new-w').value;
+  const h = +document.getElementById('new-h').value;
+  const p = +document.getElementById('new-p').value || w * h;
+  if (!w || !h) return setStatus('Item width and height are required.', true);
+  items.push({ width: w, height: h, profit: p });
+  ['new-w','new-h','new-p'].forEach(id => document.getElementById(id).value = '');
+  renderItems();
+}
+
+function removeItem(i) { items.splice(i, 1); renderItems(); }
 
 function addDefect() {
   const x = +document.getElementById('new-dx').value || 0;
@@ -683,7 +722,7 @@ function removeDefect(i) { defects.splice(i, 1); renderDefects(); renderSheet();
 function setStatus(msg, isError) {
   const el = document.getElementById('status');
   el.textContent = msg;
-  el.className = isError ? 'err' : 'ok';
+  el.className = isError ? 'err' : '';
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -709,7 +748,7 @@ function saveProblem() {
   a.click();
   URL.revokeObjectURL(a.href);
   currentFilename = a.download;
-  setStatus('Saved ' + currentFilename, false);
+  setStatus('', false);
   updateTitle();
   renderSheet();
 }
@@ -729,7 +768,7 @@ function onFileSelected(event) {
   reader.onload = e => {
     try {
       populateFromJSON(JSON.parse(e.target.result));
-      setStatus('Loaded ' + currentFilename, false);
+      setStatus('', false);
       updateTitle();
       resetView();
       renderSheet();
@@ -741,9 +780,9 @@ function onFileSelected(event) {
 
 function populateFromJSON(json) {
   const prob = json.problem || json;
-  const [w, h] = prob.sheet_size || [100, 100];
-  document.getElementById('sheet-w').value = w;
-  document.getElementById('sheet-h').value = h;
+  const [w, h] = prob.sheet_size || [0, 0];
+  document.getElementById('sheet-w').value = w || '';
+  document.getElementById('sheet-h').value = h || '';
   items = (prob.items || []).map(it => ({
     width: it.width, height: it.height,
     profit: it.profit !== undefined ? it.profit : (it.width * it.height)
@@ -807,7 +846,7 @@ function loadSolution(sol) {
   solCutsMade = result.cutsMade;
   solCur      = 0;
 
-  // compute final piece counts from last BFS step
+  // compute final piece counts from last Bfs step
   const finalFrontier = result.steps[result.steps.length - 1];
   const itemCounts = {};
   let totalPieces = 0;
@@ -819,15 +858,44 @@ function loadSolution(sol) {
       const ny = Math.floor(p.h / item.height);
       const count = nx * ny;
       totalPieces += count;
+      
       const key = item.width + '×' + item.height;
-      itemCounts[key] = (itemCounts[key] || 0) + count;
+      if (!itemCounts[key]) {
+        itemCounts[key] = { count: 0, index: p.node.item };
+      }
+      itemCounts[key].count += count;
     }
   }
-  const pieceLines = Object.entries(itemCounts)
-    .map(([k, v]) => v + ' × ' + k)
-    .join('\n');
-  document.getElementById('stat-pieces').textContent =
-    totalPieces + (pieceLines ? '\n' + pieceLines : '');
+
+  const piecesContainer = document.getElementById('stat-pieces');
+  piecesContainer.innerHTML = '';
+  
+  if (totalPieces === 0) {
+    const naSpan = document.createElement('span');
+    naSpan.className = 'stat-na';
+    naSpan.textContent = '—';
+    piecesContainer.appendChild(naSpan);
+  } else {
+    const totalDiv = document.createElement('div');
+    totalDiv.textContent = 'Total: ' + totalPieces;
+    piecesContainer.appendChild(totalDiv);
+
+    Object.entries(itemCounts).forEach(([dims, data]) => {
+      const row = document.createElement('div');
+      row.className = 'legend-row';
+
+      const box = document.createElement('div');
+      box.className = 'legend-box';
+      box.style.backgroundColor = ITEM_COLORS[data.index % ITEM_COLORS.length] + 'aa';
+
+      const label = document.createElement('span');
+      label.textContent = dims + ': ' + data.count;
+
+      row.appendChild(box);
+      row.appendChild(label);
+      piecesContainer.appendChild(row);
+    });
+  }
 
   // update stats panel
   const s = sol.solution;
@@ -849,7 +917,7 @@ function loadSolution(sol) {
 
 function buildBFSSteps(root, W, H) {
   const steps    = [];
-  const cutsMade = [null]; // null for step 0
+  const cutsMade = [null];
   let frontier = [{ x: 0, y: 0, w: W, h: H, node: root }];
   steps.push(frontier.slice());
 
@@ -906,21 +974,6 @@ function updateStepUI() {
   if (btnNext)  btnNext.disabled  = solCur >= total;
   if (btnFirst) btnFirst.disabled = solCur <= 0;
   if (btnLast)  btnLast.disabled  = solCur >= total;
-
-  const info = document.getElementById('step-info');
-  if (solCur === 0) {
-    info.textContent = 'Initial sheet — no cuts made.';
-  } else if (solCur === total) {
-    info.textContent = 'Final state — ' + solSteps[total].length + ' pieces.';
-  } else {
-    const c = solCutsMade[solCur];
-    if (c) {
-      const dir = c.type === 'x' ? 'vertical' : 'horizontal';
-      info.textContent = 'Step ' + solCur + ': ' + dir + ' cut at '
-        + (c.type === 'x' ? 'x=' + (c.px + c.pos) : 'y=' + (c.py + c.pos))
-        + ' → ' + solSteps[solCur].length + ' pieces.';
-    }
-  }
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -948,10 +1001,17 @@ function renderSheet() {
   if (currentMode !== 'sheet') return;
   sheetW = +document.getElementById('sheet-w').value;
   sheetH = +document.getElementById('sheet-h').value;
-  if (!sheetW || !sheetH) return;
 
   const area  = document.getElementById('canvas-area');
   const ph    = document.getElementById('canvas-placeholder');
+
+  if (!sheetW || !sheetH) {
+    const oldCanvas = area.querySelector('canvas');
+    if (oldCanvas) oldCanvas.remove();
+    if (ph) ph.style.display = 'block';
+    return;
+  }
+
   if (ph) ph.style.display = 'none';
 
   const areaW = area.clientWidth  || 600;
@@ -996,7 +1056,7 @@ function renderSheet() {
   ctx.strokeRect(ox, oy, sw, sh);
 
   // axis labels
-  ctx.fillStyle = '#000000'; ctx.font = '14px Georgia, serif';
+  ctx.fillStyle = '#000000'; ctx.font = '14px Verdana, sans-serif';
   ctx.textAlign = 'center'; ctx.textBaseline = 'top';
   ctx.fillText('0', ox, oy + sh + 6);
   ctx.fillText(sheetW, ox + sw, oy + sh + 6);
@@ -1005,7 +1065,7 @@ function renderSheet() {
   ctx.fillText(sheetH, ox - 6, oy);
 
   // defect ticks
-  ctx.font = '12px Georgia, serif';
+  ctx.font = '12px Verdana, sans-serif';
   for (const d of defects) {
     const dx0 = ox + d.x * scale;
     const dx1 = ox + (d.x + d.width) * scale;
@@ -1085,7 +1145,7 @@ function renderSolution() {
 
     // red coordinate label
     ctx.fillStyle = '#cc0000';
-    ctx.font = 'bold 13px Georgia, serif';
+    ctx.font = 'bold 13px Verdana, sans-serif';
     if (c.type === 'x') {
       const lx = ox + (c.px + c.pos) * scale;
       ctx.textAlign = 'center'; ctx.textBaseline = 'top';
@@ -1102,7 +1162,7 @@ function renderSolution() {
   ctx.strokeRect(ox, oy, sw, sh);
 
   // axis labels
-  ctx.fillStyle = '#000000'; ctx.font = '14px Georgia, serif';
+  ctx.fillStyle = '#000000'; ctx.font = '14px Verdana, sans-serif';
   ctx.textAlign = 'center'; ctx.textBaseline = 'top';
   ctx.fillText('0', ox, oy + sh + 6);
   ctx.fillText(W,   ox + sw, oy + sh + 6);
@@ -1157,7 +1217,7 @@ function drawSolPiece(ctx, p, items, W, H, scale, ox, oy) {
         ctx.strokeRect(tx + 0.5, ty + 0.5, iw - 1, ih - 1);
         if (fs >= 8 && iw > 20 && ih > 12) {
           ctx.fillStyle = '#000000';
-          ctx.font = 'bold ' + fs + 'px Georgia, serif';
+          ctx.font = 'bold ' + fs + 'px Verdana, sans-serif';
           ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
           ctx.fillText(label, tx + iw / 2, ty + ih / 2);
         }
@@ -1174,7 +1234,6 @@ function drawSolPiece(ctx, p, items, W, H, scale, ox, oy) {
   } else if (node.type === 'empty' || node.type === 'defect') {
     drawWasteRect(ctx, sx, sy, sw, sh);
   } else {
-    // unresolved cut — hatched
     ctx.fillStyle = '#f0ede8';
     ctx.fillRect(sx, sy, sw, sh);
     ctx.save();
@@ -1212,6 +1271,8 @@ function applyZoom(delta, cx, cy) {
     ? solutionData.problem.sheet_size[0] : sheetW;
   const H = currentMode === 'solution' && solutionData
     ? solutionData.problem.sheet_size[1] : sheetH;
+  if (!W || !H) return;
+  
   const baseScale = getBaseScale(area.clientWidth, area.clientHeight, W, H);
 
   const oldZoom = viewZoom;
@@ -1250,6 +1311,8 @@ window.addEventListener('mousemove', e => {
     ? solutionData.problem.sheet_size[0] : sheetW;
   const H = currentMode === 'solution' && solutionData
     ? solutionData.problem.sheet_size[1] : sheetH;
+  if (!W || !H) return;
+  
   const baseScale = getBaseScale(area.clientWidth, area.clientHeight, W, H);
   viewPanX = panStartViewX + (e.clientX - panStartX);
   viewPanY = panStartViewY + (e.clientY - panStartY);
@@ -1269,6 +1332,8 @@ window.addEventListener('keydown', e => {
     ? solutionData.problem.sheet_size[0] : sheetW;
   const H = currentMode === 'solution' && solutionData
     ? solutionData.problem.sheet_size[1] : sheetH;
+  if (!W || !H) return;
+  
   const baseScale = getBaseScale(area.clientWidth, area.clientHeight, W, H);
   const step = 20;
 
@@ -1293,7 +1358,7 @@ window.addEventListener('keydown', e => {
   }
 
   if (currentMode === 'sheet') renderSheet(); else renderSolution();
-});
+});renderDefects();
 
 window.addEventListener('resize', () => {
   if (currentMode === 'sheet') renderSheet(); else renderSolution();
@@ -1302,7 +1367,12 @@ window.addEventListener('resize', () => {
 // ══════════════════════════════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════════════════════════════
-renderSheet();
+renderItems();
+renderDefects();
+
+// Explicitly clear sheet dimensions on page reload
+document.getElementById('sheet-w').value = '';
+document.getElementById('sheet-h').value = '';
 </script>
 </body>
 </html>
