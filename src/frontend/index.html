@@ -113,8 +113,19 @@
       font-size: 1rem;
       font-weight: 400;
       font-family: Verdana, sans-serif;
+      /* Firefox support */
+      -moz-appearance: textfield;
+      /* Standard property for compatibility */
+      appearance: textfield;
     }
     input[type="number"]:focus { outline: none; border-color: #5c3a1e; }
+
+    /* Chrome, Safari, Edge, and Opera support */
+    input[type="number"]::-webkit-outer-spin-button,
+    input[type="number"]::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
 
     .row   { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
     .row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.5rem; }
