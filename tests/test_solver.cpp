@@ -202,3 +202,27 @@ TEST_CASE("Solver: paper second set category 1 pure instance", "[Solver]") {
     Solver s(p);
     REQUIRE(s.solve() == 225);
 }
+
+TEST_CASE("Solver: defect sheet iterative backend", "[Solver]") {
+    Problem p(27, 27,
+              {5, 10, 12, 15},
+              {5, 10, 12, 15},
+              {25, 100, 144, 225},
+              {{9, 9, 2, 2}});
+    Solver s(p);
+    REQUIRE(s.solve(Solver::Mode::Iterative) == 644);
+    auto seq = s.reconstruct();
+    REQUIRE(seq != nullptr);
+}
+
+TEST_CASE("Solver: defect sheet recursive reconstruct", "[Solver]") {
+    Problem p(27, 27,
+              {5, 10, 12, 15},
+              {5, 10, 12, 15},
+              {25, 100, 144, 225},
+              {{9, 9, 2, 2}});
+    Solver s(p);
+    s.solve(Solver::Mode::Recursive);
+    auto seq = s.reconstruct();
+    REQUIRE(seq != nullptr);
+}

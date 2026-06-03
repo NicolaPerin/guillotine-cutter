@@ -61,3 +61,36 @@ TEST_CASE("write_solution throws on bad output path", "[solution_writer]") {
         std::runtime_error
     );
 }
+
+TEST_CASE("cut_sequence_to_json covers CutX", "[solution_writer]") {
+    // 5x3 sheet with two different items forces an X-cut
+    Problem p(5, 3, {3, 2}, {3, 3}, {9, 6}, {});
+    Solver s(p);
+    int32_t value = s.solve();
+    auto seq = s.reconstruct();
+
+    const std::string path = "/tmp/test_solution_writer_cutx.json";
+    REQUIRE_NOTHROW(write_solution(path, p, value, seq));
+
+    std::ifstream f(path);
+    json j = json::parse(f);
+
+    std::function<bool(const json&)> has_cut_x = [&](const json& node) -> bool {
+        if (!node.is_object()) return false;
+        if (node.value("type", "") == "cut_x") return true;
+        if (node.contains("left")  && has_cut_x(node["left"]))  return true;
+        if (node.contains("right") && has_cut_x(node["right"])) return true;
+        return false;
+    };
+    REQUIRE(has_cut_x(j["solution"]["cut_sequence"]));
+}
+
+TEST_CASE("cut_sequence_to_json handles null sequence", "[solution_writer]") {
+    Problem p = small_pure_problem();
+    const std::string path = "/tmp/test_solution_writer_null.json";
+    REQUIRE_NOTHROW(write_solution(path, p, 0, nullptr));
+
+    std::ifstream f(path);
+    json j = json::parse(f);
+    REQUIRE(j["solution"]["cut_sequence"]["type"] == "empty");
+}
