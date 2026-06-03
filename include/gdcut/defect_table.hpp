@@ -40,16 +40,6 @@ namespace gdcut {
             inline bool has_affected_positions(int w, int h) const {
                 return has_affected_[w * (sheet_height_ + 1) + h];
             }
-
-            /** @brief Get a pointer to the deltas data
-             *  @return Pointer to the deltas data
-             */
-            const uint16_t* deltas_data()   const;
-
-            /** @brief Get the total number of deltas across all affected regions.
-             *  @return Total number of deltas
-             */
-            int64_t         total_deltas()  const;
             
             /** @brief Check if the number of deltas exceeds the maximum representable by uint16_t.
              *  @return True if overflow occurs, false otherwise

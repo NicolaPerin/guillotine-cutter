@@ -108,7 +108,5 @@ PureTable::PureTable(int sheet_width, int sheet_height,
 
 int            PureTable::sheet_width()   const { return sheet_width_; }
 int            PureTable::sheet_height()  const { return sheet_height_; }
-const int32_t* PureTable::values_data()   const { return values_.data(); }
-int            PureTable::values_stride() const { return sheet_height_ + 1; }
 
 } // namespace gdcut

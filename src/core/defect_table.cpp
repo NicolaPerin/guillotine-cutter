@@ -528,8 +528,6 @@ void DefectTable::fill_deltas(const DefectMap& defect_map,
     overflow_ = overflow_ || (overflow_seen != 0);
 }
 
-const uint16_t* DefectTable::deltas_data()  const { return deltas_.data(); }
-int64_t         DefectTable::total_deltas() const { return static_cast<int64_t>(deltas_.size()); }
 bool            DefectTable::overflow()     const { return overflow_; }
 
 } // namespace gdcut

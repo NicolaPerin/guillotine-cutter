@@ -65,16 +65,6 @@ namespace gdcut {
                 return best_items_[w * (sheet_height_ + 1) + h];
             }
 
-            /** @brief Get a pointer to the values data
-             *  @return Pointer to the values data
-             */
-            const int32_t* values_data() const;
-
-            /** @brief Get the stride of the values data
-             *  @return Stride of the values data
-             */
-            int values_stride() const;
-
         private:
             int sheet_width_;
             int sheet_height_;
