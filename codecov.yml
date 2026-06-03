@@ -1,0 +1,12 @@
+coverage:
+  ignore:
+    - "vendor/"
+    - "tests/"
+    - "build/"
+
+gcov:
+  branch_detection:
+    conditional: false
+    loop: false
+    method: false
+    macro: false
