@@ -1,5 +1,7 @@
 # gdcut
 
+[![CI](https://github.com/NicolaPerin/guillotine-cutter/actions/workflows/ci.yml/badge.svg)](https://github.com/NicolaPerin/guillotine-cutter/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/NicolaPerin/guillotine-cutter/branch/main/graph/badge.svg)](https://codecov.io/gh/NicolaPerin/guillotine-cutter)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Language: C++17](https://img.shields.io/badge/language-C%2B%2B17-blue.svg)
 
