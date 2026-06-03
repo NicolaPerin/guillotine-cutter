@@ -1,12 +1,10 @@
 # gdcut
-
 [![CI](https://github.com/NicolaPerin/guillotine-cutter/actions/workflows/ci.yml/badge.svg)](https://github.com/NicolaPerin/guillotine-cutter/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/NicolaPerin/guillotine-cutter/branch/main/graph/badge.svg)](https://codecov.io/gh/NicolaPerin/guillotine-cutter)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Language: C++17](https://img.shields.io/badge/language-C%2B%2B17-blue.svg)
 
 Freely inspired by:
-
 H. Zhang, S. Yao, Q. Liu, J. Leng, and L. Wei,
 "Exact approaches for the unconstrained two-dimensional cutting problem with defects,"
 *Computers & Operations Research*, vol. 160, 106407, 2023.
@@ -59,12 +57,32 @@ Override with `--solver iterative|recursive|auto`.
 
 ## Usage
 
+### Command line
+
 ```bash
 ./build/gdcut solve problem.json
 ./build/gdcut solve problem.json solution.json     # custom output path
 ./build/gdcut solve problem.json -t 8              # 8 OpenMP threads
 ./build/gdcut solve problem.json --solver recursive
 ./build/gdcut solve problem.json --sparse-threshold 0.6
+```
+
+### Web interface
+
+```bash
+./build/gdcut serve
+```
+
+Opens a local web interface at `http://localhost:8080`. The interface allows
+interactive problem definition (sheet dimensions, items, defects), solver
+selection, and step-by-step visualization of the cut sequence.
+
+> **Work in progress.** The visualizer is functional but still under active development.
+
+Options:
+
+```bash
+./build/gdcut serve --port 9090
 ```
 
 ## Tests
