@@ -4,6 +4,7 @@
 #include "gdcut/solution_writer.hpp"
 #include "httplib.h"
 #include "json.hpp"
+#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -13,10 +14,25 @@ using namespace gdcut;
 
 namespace gdcut {
 
+// Bind to loopback only. The UI is a local tool, so the server must not be
+// reachable from other machines on the network. To expose it on a LAN
+// deliberately, change this to "0.0.0.0" (and accept the consequences).
+static constexpr const char* BIND_HOST = "127.0.0.1";
+
+// Blanket cap on any request body, enforced by httplib before the body is
+// fully buffered. Protects every endpoint from oversized payloads.
+static constexpr size_t MAX_REQUEST_BYTES = 4u << 20;  // 4 MB
+
+// Tighter cap for the problem JSON specifically. A problem instance is small;
+// anything larger is rejected with a clear message rather than written to disk.
+static constexpr size_t MAX_PROBLEM_BYTES = 1u << 20;  // 1 MB
+
 void run_server(int port,
                 const std::string& frontend_dir,
-                const std::string& work_dir) {
+                const std::string& work_dir,
+                bool quiet) {
     httplib::Server server;
+    server.set_payload_max_length(MAX_REQUEST_BYTES);
 
     // serve index.html at root
     server.Get("/", [&](const httplib::Request&, httplib::Response& res) {
@@ -33,6 +49,23 @@ void run_server(int port,
 
     // save problem JSON to disk
     server.Post("/save", [&](const httplib::Request& req, httplib::Response& res) {
+        // Reject oversized bodies with a clear message before touching disk.
+        if (req.body.size() > MAX_PROBLEM_BYTES) {
+            res.status = 413;  // Payload Too Large
+            res.set_content("Problem too large", "text/plain");
+            return;
+        }
+
+        // Reject anything that is not valid JSON, so a bad save fails here
+        // instead of silently corrupting problem.json and surfacing at /solve.
+        // accept() validates without building the document and returns a bool,
+        // so there is no discarded parse result to warn about.
+        if (!json::accept(req.body)) {
+            res.status = 400;  // Bad Request
+            res.set_content("Body is not valid JSON", "text/plain");
+            return;
+        }
+
         const std::string path = work_dir + "/problem.json";
         std::ofstream f(path);
         if (!f) {
@@ -62,6 +95,10 @@ void run_server(int port,
             if      (solver_mode == "iterative") mode = Solver::Mode::Iterative;
             else if (solver_mode == "recursive") mode = Solver::Mode::Recursive;
 
+            // Problem::from_json validates sheet/item/defect bounds and throws
+            // on out-of-range input, which caps the work this endpoint commits
+            // to before allocating the DP tables. The catch below turns any
+            // such failure into a 500 with the message.
             Problem problem = Problem::from_json(prob_path);
             Solver  solver(problem);
 
@@ -92,11 +129,13 @@ void run_server(int port,
         res.set_content(ss.str(), "application/json");
     });
 
-    std::cout << "gdcut UI running at http://localhost:" << port << "\n"
-              << "Press Ctrl+C to stop.\n";
-    if (!server.listen("0.0.0.0", port)) {
+    if (!quiet) {
+        std::cout << "gdcut UI running at http://localhost:" << port << "\n"
+                  << "Press Ctrl+C to stop.\n";
+    }
+    if (!server.listen(BIND_HOST, port)) {
         std::cerr << "Error: failed to bind to port " << port
-                << " - is it already in use?\n";
+                  << " - is it already in use?\n";
         return;
     }
 }

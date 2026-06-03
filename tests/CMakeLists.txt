@@ -52,6 +52,12 @@ add_executable(test_recursive_solver
 )
 target_link_libraries(test_recursive_solver PRIVATE gdcut_core)
 
+add_executable(test_server
+    catch_main.cpp
+    test_server.cpp
+)
+target_link_libraries(test_server PRIVATE gdcut_core)
+
 add_executable(test_all
     catch_main.cpp
     test_cut_candidates.cpp
@@ -61,6 +67,7 @@ add_executable(test_all
     test_problem.cpp
     test_pure_table.cpp
     test_recursive_solver.cpp
+    test_server.cpp
     test_solver.cpp
     test_solution_writer.cpp
 )
@@ -74,6 +81,7 @@ add_test(NAME test_patterns COMMAND test_patterns)
 add_test(NAME test_pure_table COMMAND test_pure_table)
 add_test(NAME test_problem COMMAND test_problem)
 add_test(NAME test_recursive_solver COMMAND test_recursive_solver)
+add_test(NAME test_server COMMAND test_server)
 add_test(NAME test_solver COMMAND test_solver)
 add_test(NAME test_solution_writer COMMAND test_solution_writer)
 add_test(NAME test_all COMMAND test_all)

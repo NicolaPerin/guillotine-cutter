@@ -39,7 +39,7 @@ add_library(gdcut_core
     src/core/recursive_solver.cpp
     src/core/solution_writer.cpp
     src/core/solver.cpp
-    src/server/server.cpp      # ← add
+    src/server/server.cpp
 )
 
 target_link_libraries(gdcut_core PUBLIC OpenMP::OpenMP_CXX Threads::Threads)
