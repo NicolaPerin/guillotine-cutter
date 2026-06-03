@@ -3,6 +3,7 @@ coverage:
     - "vendor/"
     - "tests/"
     - "build/"
+    - "include/"
 
 gcov:
   branch_detection:
